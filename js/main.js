@@ -158,6 +158,10 @@ function startGame(mode, level = null) {
 
   if (level) showLevelBanner(level);
 
+  // Forest ambient background
+  stopForestBg();
+  if (THEMES[currentTheme]?.forestBg) startForestBg();
+
   if (animId) cancelAnimationFrame(animId);
   loop();
 
@@ -168,6 +172,108 @@ function loop() {
   if (!engine || !renderer) return;
   renderer.draw(engine, drag.active ? drag : null);
   animId = requestAnimationFrame(loop);
+}
+
+// ── FOREST AMBIENT BACKGROUND ─────────────────────────────────────────────────
+let _forestCanvas = null;
+function drawForestBg() {
+  const screen = document.getElementById('screen-game');
+  if (!screen) return;
+
+  if (!_forestCanvas) {
+    _forestCanvas = document.createElement('canvas');
+    _forestCanvas.style.cssText = `
+      position:absolute;inset:0;width:100%;height:100%;
+      pointer-events:none;z-index:0;opacity:0.55;
+    `;
+    screen.insertBefore(_forestCanvas, screen.firstChild);
+  }
+
+  const w = screen.offsetWidth, h = screen.offsetHeight;
+  _forestCanvas.width  = w;
+  _forestCanvas.height = h;
+  const ctx = _forestCanvas.getContext('2d');
+  ctx.clearRect(0, 0, w, h);
+
+  // Gradient sky-to-ground
+  const sky = ctx.createLinearGradient(0, 0, 0, h);
+  sky.addColorStop(0,   '#0e2010');
+  sky.addColorStop(0.5, '#111a12');
+  sky.addColorStop(1,   '#0a1209');
+  ctx.fillStyle = sky;
+  ctx.fillRect(0, 0, w, h);
+
+  // Draw simple tree silhouettes
+  const drawTree = (x, baseY, trunkH, trunkW, layers, layerColor) => {
+    // Trunk
+    ctx.fillStyle = '#2d1b0e55';
+    ctx.fillRect(x - trunkW/2, baseY - trunkH, trunkW, trunkH);
+    // Layered triangles (pine tree)
+    for (let i = 0; i < layers; i++) {
+      const ly = baseY - trunkH - i * (trunkH * 0.3);
+      const lw = trunkW * (4 - i * 0.5);
+      const lh = trunkH * 0.55;
+      ctx.fillStyle = layerColor;
+      ctx.globalAlpha = 0.18 + i * 0.04;
+      ctx.beginPath();
+      ctx.moveTo(x, ly - lh);
+      ctx.lineTo(x - lw, ly);
+      ctx.lineTo(x + lw, ly);
+      ctx.closePath();
+      ctx.fill();
+    }
+    ctx.globalAlpha = 1;
+  };
+
+  // Far trees (lighter, smaller)
+  const farColor = '#1e3d1e';
+  [0.08, 0.22, 0.38, 0.62, 0.75, 0.88, 0.95].forEach((fx, i) => {
+    drawTree(fx * w, h * 0.72, h * 0.18, 6, 4, farColor);
+  });
+
+  // Near trees (darker, taller)
+  const nearColor = '#152d15';
+  [-0.04, 0.12, 0.5, 0.88, 1.04].forEach((fx) => {
+    drawTree(fx * w, h, h * 0.38, 10, 5, nearColor);
+  });
+
+  // Fireflies / bokeh lights
+  const now = Date.now();
+  ctx.save();
+  for (let i = 0; i < 18; i++) {
+    const fx = (Math.sin(i * 73.1 + now * 0.0004 + i) * 0.5 + 0.5) * w;
+    const fy = (Math.cos(i * 51.7 + now * 0.0003) * 0.3 + 0.45) * h;
+    const fa = 0.15 + 0.35 * Math.abs(Math.sin(now * 0.001 * (i * 0.3 + 0.7) + i * 2.1));
+    const fr = 1.5 + Math.sin(i) * 0.8;
+    const grad = ctx.createRadialGradient(fx, fy, 0, fx, fy, fr * 4);
+    grad.addColorStop(0, `rgba(180,255,150,${fa})`);
+    grad.addColorStop(1, 'rgba(180,255,150,0)');
+    ctx.fillStyle = grad;
+    ctx.beginPath(); ctx.arc(fx, fy, fr * 4, 0, Math.PI * 2); ctx.fill();
+  }
+  ctx.restore();
+
+  // Moon glow in top-right
+  const mx = w * 0.8, my = h * 0.08;
+  const moonGrad = ctx.createRadialGradient(mx, my, 0, mx, my, h * 0.18);
+  moonGrad.addColorStop(0,   'rgba(200,235,180,0.12)');
+  moonGrad.addColorStop(0.5, 'rgba(150,200,130,0.06)');
+  moonGrad.addColorStop(1,   'rgba(0,0,0,0)');
+  ctx.fillStyle = moonGrad;
+  ctx.fillRect(0, 0, w, h);
+}
+
+let _forestBgAnimId = null;
+function startForestBg() {
+  const animate = () => {
+    drawForestBg();
+    _forestBgAnimId = requestAnimationFrame(animate);
+  };
+  animate();
+}
+function stopForestBg() {
+  cancelAnimationFrame(_forestBgAnimId);
+  if (_forestCanvas) { _forestCanvas.remove(); _forestCanvas = null; }
 }
 
 // ── SCORE / EVENTS ────────────────────────────────────────────────────────────
@@ -399,11 +505,13 @@ function onDragEnd() {
     haptic('light');
     SoundEngine.place();
   } else {
-    // Snap back animation
+    // Snap back animation with CSS class
     const slot = $(`ps-${drag.idx}`);
     if (slot) {
-      slot.style.transform = 'scale(0.9)';
-      setTimeout(() => { slot.style.transform = ''; }, 200);
+      slot.classList.remove('snap-back');
+      void slot.offsetWidth; // reflow
+      slot.classList.add('snap-back');
+      setTimeout(() => slot.classList.remove('snap-back'), 250);
     }
     haptic('warning');
     SoundEngine.error();
