@@ -525,3 +525,35 @@ html, body {
 /* Responsive */
 @media (max-height:700px) { .menu-logo-wrap{width:70px;height:70px;margin-bottom:10px} .menu-title{font-size:26px} .btn-xl{padding:13px 18px} .piece-tray{padding:8px 16px 4px} }
 @media (max-height:600px) { .menu-user{margin-top:10px} .menu-stats{margin-top:10px} .menu-actions{margin-top:12px;gap:8px} }
+
+/* ─── DRAG FLOAT (piece following finger) ────────────────────────────────── */
+/* Injected by renderer.showDragFloat() as position:fixed canvas */
+/* transform:scale(1.18) translate(-50%,-130%) — above finger, scaled up     */
+
+/* Piece slot snap-back animation */
+.piece-slot {
+  transition: border-color .18s ease, transform .22s cubic-bezier(.34,1.56,.64,1), 
+              box-shadow .18s ease, opacity .18s ease;
+}
+
+/* Score pop keyframe */
+@keyframes scorePop {
+  0%   { transform:scale(1); }
+  40%  { transform:scale(1.22); }
+  100% { transform:scale(1); }
+}
+.sc-value.pop { animation: scorePop .28s cubic-bezier(.34,1.56,.64,1); }
+
+/* Smooth screen fade */
+.screen { transition: opacity .22s ease, transform .24s cubic-bezier(.4,0,.2,1); }
+
+/* Piece slot active glow */
+.piece-slot:not(.used):active {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px var(--accent-dim);
+  transform: scale(0.94);
+}
+
+/* Game action buttons transition */
+.ga-btn { transition: transform .12s ease, opacity .14s ease, background .18s ease; }
+.ga-btn:hover { background: var(--surface2); }
