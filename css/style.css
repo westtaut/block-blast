@@ -557,3 +557,68 @@ html, body {
 /* Game action buttons transition */
 .ga-btn { transition: transform .12s ease, opacity .14s ease, background .18s ease; }
 .ga-btn:hover { background: var(--surface2); }
+
+/* ─── FOREST THEME AMBIANCE ─────────────────────────────────────────────────── */
+/* Drawn via JS canvas background — these just ensure body/app fill nicely */
+#screen-game {
+  background: transparent;  /* allow body background to show */
+}
+
+/* Soft vignette overlay on game screen for atmosphere */
+#screen-game::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: radial-gradient(ellipse at 50% 50%, transparent 40%, rgba(0,0,0,0.28) 100%);
+  pointer-events: none;
+  z-index: 0;
+}
+
+/* Ensure canvas and all game children stack above the vignette */
+#screen-game > * { position: relative; z-index: 1; }
+
+/* ─── GAME SCREEN BREATHING ROOM ────────────────────────────────────────────── */
+/* Larger top spacing so background is visible */
+#screen-game {
+  padding-top: calc(var(--safe-top) + 10px);
+  padding-bottom: calc(var(--safe-bot) + 10px);
+  justify-content: space-between;
+}
+
+/* Piece tray — more padding */
+.piece-tray {
+  padding: 12px 20px 8px;
+  gap: 12px;
+}
+
+/* Piece slot — slightly larger */
+.piece-slot {
+  min-height: 80px;
+}
+
+/* ─── CANVAS ROUNDED BORDER ─────────────────────────────────────────────────── */
+#game-canvas {
+  border-radius: 20px;
+  box-shadow: 0 12px 48px rgba(0,0,0,0.5);
+}
+
+/* ─── FOREST LEAF DECORATIONS ───────────────────────────────────────────────── */
+/* Subtle emoji leaves in background for forest theme — handled via JS */
+
+/* ─── IMPROVED SCORE POP ANIMATION ─────────────────────────────────────────── */
+@keyframes scoreBounce {
+  0%   { transform: scale(1) translateY(0); }
+  30%  { transform: scale(1.28) translateY(-3px); }
+  60%  { transform: scale(0.95) translateY(0); }
+  80%  { transform: scale(1.06) translateY(-1px); }
+  100% { transform: scale(1) translateY(0); }
+}
+.sc-value.pop { animation: scoreBounce .35s cubic-bezier(.34,1.56,.64,1); }
+
+/* ─── SNAP-BACK ANIMATION FOR PIECE SLOTS ───────────────────────────────────── */
+@keyframes slotSnapBack {
+  0%   { transform: scale(0.88); }
+  60%  { transform: scale(1.04); }
+  100% { transform: scale(1); }
+}
+.piece-slot.snap-back { animation: slotSnapBack .22s cubic-bezier(.34,1.56,.64,1); }
