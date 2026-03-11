@@ -2,26 +2,26 @@
 
 class Renderer {
   constructor(canvas, opts = {}) {
-    this.canvas  = canvas;
-    this.ctx     = canvas.getContext('2d');
-    this.theme   = opts.theme || 'dark';
-    this.gridSize= opts.gridSize || 8;
+    this.canvas   = canvas;
+    this.ctx      = canvas.getContext('2d');
+    this.theme    = opts.theme || 'dark';
+    this.gridSize = opts.gridSize || 8;
 
-    this.particles     = [];
-    this.clearAnim     = [];  // rows/cols being cleared
-    this.shakeTime     = 0;
-    this.shakeAmount   = 0;
-    this.floatTexts    = [];
-    this.blockScale    = Array.from({length:this.gridSize},()=>Array(this.gridSize).fill(1));
-    this.blockAlpha    = Array.from({length:this.gridSize},()=>Array(this.gridSize).fill(1));
+    this.particles  = [];
+    this.clearAnim  = [];
+    this.floatTexts = [];
+    this.blockScale = Array.from({length:this.gridSize},()=>Array(this.gridSize).fill(1));
+    this.blockAlpha = Array.from({length:this.gridSize},()=>Array(this.gridSize).fill(1));
+    this.shakeTime  = 0;
+    this.shakeAmt   = 0;
 
     this._resize();
   }
 
   _resize() {
-    const size = Math.min(window.innerWidth, 420);
-    const padding = 16;
-    this.cellSize = Math.floor((size - padding * 2) / this.gridSize);
+    const side    = Math.min(window.innerWidth, 430);
+    const padding = 32;
+    this.cellSize = Math.floor((side - padding) / this.gridSize);
     this.boardW   = this.cellSize * this.gridSize;
     this.boardH   = this.cellSize * this.gridSize;
     this.canvas.width  = this.boardW;
@@ -32,309 +32,320 @@ class Renderer {
 
   resize() { this._resize(); }
 
-  // ── Main Draw ────────────────────────────────────────────────────────────
+  // ── MAIN DRAW LOOP ────────────────────────────────────────────────────────
   draw(engine, dragState) {
-    const { ctx, cellSize, boardW, boardH } = this;
+    const { ctx, boardW, boardH } = this;
     const t = THEMES[this.theme] || THEMES.dark;
 
     ctx.clearRect(0, 0, boardW, boardH);
-
-    // Shake
     ctx.save();
+
+    // Shake offset
     if (this.shakeTime > 0) {
-      const s = this.shakeAmount * (this.shakeTime / 10);
-      ctx.translate((Math.random()-0.5)*s, (Math.random()-0.5)*s);
+      const s = this.shakeAmt * (this.shakeTime / 10);
+      ctx.translate((Math.random() - 0.5) * s, (Math.random() - 0.5) * s);
+      this.shakeTime--;
     }
 
-    // Grid background
-    this._drawGrid(t);
-
-    // Ghost preview
-    if (dragState?.piece && dragState.gridCol !== null) {
-      this._drawGhost(engine, dragState, t);
-    }
-
-    // Placed blocks
+    this._drawGridBg(t);
+    this._drawSnappedPiece(engine, dragState, t);
     this._drawBlocks(engine.grid, t);
-
-    // Clear animations
     this._drawClearAnims(t);
-
-    // Particles
     this._drawParticles();
-
-    // Float texts
     this._drawFloatTexts();
 
     ctx.restore();
-
-    // Decay
-    if (this.shakeTime > 0) this.shakeTime--;
   }
 
-  _drawGrid(t) {
+  // ── GRID BACKGROUND ───────────────────────────────────────────────────────
+  _drawGridBg(t) {
     const { ctx, cellSize, boardW, boardH, gridSize } = this;
 
-    // Background
     ctx.fillStyle = t.gridBg;
-    this._roundRect(ctx, 0, 0, boardW, boardH, 16);
+    this._rrect(ctx, 0, 0, boardW, boardH, 16);
     ctx.fill();
 
-    // Grid lines
+    // Lines
     ctx.strokeStyle = t.gridLine;
-    ctx.lineWidth = 1;
+    ctx.lineWidth   = 1;
     for (let i = 1; i < gridSize; i++) {
-      ctx.beginPath();
-      ctx.moveTo(i * cellSize, 4);
-      ctx.lineTo(i * cellSize, boardH - 4);
-      ctx.stroke();
-
-      ctx.beginPath();
-      ctx.moveTo(4, i * cellSize);
-      ctx.lineTo(boardW - 4, i * cellSize);
-      ctx.stroke();
+      ctx.beginPath(); ctx.moveTo(i * cellSize, 6); ctx.lineTo(i * cellSize, boardH - 6); ctx.stroke();
+      ctx.beginPath(); ctx.moveTo(6, i * cellSize); ctx.lineTo(boardW - 6, i * cellSize); ctx.stroke();
     }
 
-    // Cell dots
+    // Dots at intersections
     ctx.fillStyle = t.gridLine;
-    for (let r = 0; r < gridSize; r++) {
-      for (let c = 0; c < gridSize; c++) {
-        const cx = c * cellSize + cellSize/2;
-        const cy = r * cellSize + cellSize/2;
+    for (let r = 1; r < gridSize; r++) {
+      for (let c = 1; c < gridSize; c++) {
         ctx.beginPath();
-        ctx.arc(cx, cy, 1.5, 0, Math.PI*2);
+        ctx.arc(c * cellSize, r * cellSize, 1.5, 0, Math.PI * 2);
         ctx.fill();
       }
     }
   }
 
+  // ── SNAPPED PIECE PREVIEW ON CANVAS (no floating element) ─────────────────
+  // This replaces the old floating HTML ghost — the piece is drawn directly
+  // on the canvas at its snapped grid position, WITH or WITHOUT validation tint.
+  _drawSnappedPiece(engine, dragState, t) {
+    if (!dragState?.active || dragState.snapCol === null || dragState.snapRow === null) return;
+
+    const { ctx, cellSize } = this;
+    const piece  = dragState.piece;
+    const col    = dragState.snapCol;
+    const row    = dragState.snapRow;
+    const valid  = dragState.valid;
+    const color  = t.blocks[piece.color % t.blocks.length];
+
+    for (const [dx, dy] of piece.cells) {
+      const c = col + dx, r = row + dy;
+      // Draw even if out of bounds slightly for visual feedback
+      const x = c * cellSize;
+      const y = r * cellSize;
+      const pad = 3, w = cellSize - pad*2, h = cellSize - pad*2, radius = Math.max(4, cellSize * 0.18);
+
+      ctx.globalAlpha = valid ? 0.92 : 0.45;
+
+      // Tint: green-ish when valid, red-ish when invalid
+      let drawColor = color;
+      if (!valid) {
+        drawColor = '#f87171';  // red
+      }
+
+      // No shadow on dragged piece (clean, crisp)
+      ctx.shadowBlur = 0;
+
+      ctx.fillStyle = drawColor;
+      this._rrect(ctx, x + pad, y + pad, w, h, radius);
+      ctx.fill();
+
+      // Highlight
+      if (valid) {
+        const grad = ctx.createLinearGradient(x+pad, y+pad, x+pad, y+pad + h*0.45);
+        grad.addColorStop(0, 'rgba(255,255,255,0.35)');
+        grad.addColorStop(1, 'rgba(255,255,255,0)');
+        ctx.fillStyle = grad;
+        this._rrect(ctx, x+pad+2, y+pad+2, w-4, h*0.4, radius-1);
+        ctx.fill();
+      }
+
+      ctx.globalAlpha = 1;
+    }
+  }
+
+  // ── PLACED BLOCKS ─────────────────────────────────────────────────────────
   _drawBlocks(grid, t) {
     const { ctx, cellSize, gridSize } = this;
     for (let r = 0; r < gridSize; r++) {
       for (let c = 0; c < gridSize; c++) {
         const v = grid[r][c];
-        if (v === 0) continue;
-        const color = t.blocks[(v-1) % t.blocks.length];
-        const sc = this.blockScale[r][c];
-        const al = this.blockAlpha[r][c];
-        this._drawBlock(ctx, c, r, cellSize, color, sc, al, t);
+        if (!v) continue;
+        const color = t.blocks[(v - 1) % t.blocks.length];
+        this._drawBlock(ctx, c, r, cellSize, color,
+          this.blockScale[r][c], this.blockAlpha[r][c], t);
       }
     }
   }
 
-  _drawBlock(ctx, col, row, cs, color, scale=1, alpha=1, t) {
+  _drawBlock(ctx, col, row, cs, color, scale = 1, alpha = 1, t) {
     const pad = 3;
-    const x = col * cs + pad + (cs - pad*2) * (1-scale) / 2;
-    const y = row * cs + pad + (cs - pad*2) * (1-scale) / 2;
-    const w = (cs - pad*2) * scale;
-    const h = (cs - pad*2) * scale;
-    const r = Math.max(3, Math.floor(cs * 0.18));
+    const bw  = (cs - pad * 2) * scale;
+    const bh  = (cs - pad * 2) * scale;
+    const bx  = col * cs + pad + (cs - pad*2) * (1 - scale) / 2;
+    const by  = row * cs + pad + (cs - pad*2) * (1 - scale) / 2;
+    const r   = Math.max(3, Math.floor(cs * 0.18));
 
     ctx.globalAlpha = alpha;
 
-    // Shadow
-    ctx.shadowColor = color + '66';
-    ctx.shadowBlur  = t.glowBlocks ? cs * 0.4 : cs * 0.15;
-    ctx.shadowOffsetX = 0;
-    ctx.shadowOffsetY = t.glowBlocks ? 0 : cs * 0.08;
+    // Subtle shadow (only for placed blocks)
+    ctx.shadowColor   = color + '44';
+    ctx.shadowBlur    = t.glowBlocks ? cs * 0.35 : cs * 0.1;
+    ctx.shadowOffsetY = t.glowBlocks ? 0 : 2;
 
-    // Block body
     ctx.fillStyle = color;
-    this._roundRect(ctx, x, y, w, h, r);
+    this._rrect(ctx, bx, by, bw, bh, r);
     ctx.fill();
 
-    // Highlight
-    ctx.shadowBlur = 0;
-    ctx.shadowColor = 'transparent';
-    const grad = ctx.createLinearGradient(x, y, x, y + h * 0.5);
-    grad.addColorStop(0, 'rgba(255,255,255,0.35)');
+    // Shine
+    ctx.shadowBlur    = 0;
+    ctx.shadowColor   = 'transparent';
+    ctx.shadowOffsetY = 0;
+    const grad = ctx.createLinearGradient(bx, by, bx, by + bh * 0.5);
+    grad.addColorStop(0, 'rgba(255,255,255,0.32)');
     grad.addColorStop(1, 'rgba(255,255,255,0)');
     ctx.fillStyle = grad;
-    this._roundRect(ctx, x + 2, y + 2, w - 4, h * 0.45, r - 1);
+    this._rrect(ctx, bx + 2, by + 2, bw - 4, bh * 0.42, r - 1);
     ctx.fill();
 
-    ctx.globalAlpha = 1;
-    ctx.shadowBlur = 0;
+    ctx.globalAlpha   = 1;
+    ctx.shadowBlur    = 0;
+    ctx.shadowColor   = 'transparent';
+    ctx.shadowOffsetY = 0;
   }
 
-  _drawGhost(engine, { piece, gridCol, gridRow }, t) {
-    const { ctx, cellSize } = this;
-    ctx.globalAlpha = 0.2;
-    for (const [dx, dy] of piece.cells) {
-      const c = gridCol + dx, r = gridRow + dy;
-      if (c < 0 || c >= this.gridSize || r < 0 || r >= this.gridSize) continue;
-      const color = t.blocks[piece.color % t.blocks.length];
-      ctx.fillStyle = color;
-      this._roundRect(ctx, c*cellSize+3, r*cellSize+3, cellSize-6, cellSize-6, Math.max(3,cellSize*0.18));
-      ctx.fill();
-    }
-    ctx.globalAlpha = 1;
-  }
-
+  // ── CLEAR ANIMATIONS ──────────────────────────────────────────────────────
   _drawClearAnims(t) {
     const { ctx, cellSize, boardW, boardH } = this;
     const now = Date.now();
     this.clearAnim = this.clearAnim.filter(a => {
-      const age = now - a.start;
-      if (age > 400) return false;
-      const progress = age / 400;
-      ctx.globalAlpha = 1 - progress;
-      ctx.fillStyle = t.accent;
-      if (a.type === 'row') {
-        ctx.fillRect(0, a.index * cellSize + 2, boardW, cellSize - 4);
-      } else {
-        ctx.fillRect(a.index * cellSize + 2, 0, cellSize - 4, boardH);
-      }
+      const age = (now - a.start) / 380;
+      if (age >= 1) return false;
+      ctx.globalAlpha = (1 - age) * 0.7;
+      ctx.fillStyle   = t.accent;
+      if (a.type === 'row') ctx.fillRect(0, a.index * cellSize + 2, boardW, cellSize - 4);
+      else                  ctx.fillRect(a.index * cellSize + 2, 0, cellSize - 4, boardH);
       ctx.globalAlpha = 1;
       return true;
     });
   }
 
+  // ── PARTICLES ─────────────────────────────────────────────────────────────
   _drawParticles() {
     const { ctx } = this;
     const now = Date.now();
     this.particles = this.particles.filter(p => {
-      const age = (now - p.born) / p.life;
-      if (age >= 1) return false;
-      ctx.globalAlpha = 1 - age;
-      ctx.fillStyle = p.color;
+      const t = (now - p.born) / p.life;
+      if (t >= 1) return false;
       const px = p.x + p.vx * (now - p.born) / 16;
-      const py = p.y + p.vy * (now - p.born) / 16 + 0.5 * p.gravity * ((now-p.born)/16)**2;
-      const s = p.size * (1 - age * 0.5);
+      const py = p.y + p.vy * (now - p.born) / 16 + 0.5 * p.gravity * ((now - p.born) / 16) ** 2;
+      ctx.globalAlpha = 1 - t;
+      ctx.fillStyle   = p.color;
       ctx.beginPath();
-      ctx.arc(px, py, s, 0, Math.PI*2);
+      ctx.arc(px, py, p.size * (1 - t * 0.4), 0, Math.PI * 2);
       ctx.fill();
       ctx.globalAlpha = 1;
       return true;
     });
   }
 
+  // ── FLOAT TEXTS ───────────────────────────────────────────────────────────
   _drawFloatTexts() {
     const { ctx } = this;
     const now = Date.now();
     this.floatTexts = this.floatTexts.filter(f => {
       const age = (now - f.born) / f.life;
       if (age >= 1) return false;
-      const y = f.y - 60 * age;
-      ctx.globalAlpha = age < 0.7 ? 1 : 1 - (age - 0.7) / 0.3;
-      ctx.fillStyle = f.color;
-      ctx.font = `bold ${f.size}px -apple-system, SF Pro Display, sans-serif`;
-      ctx.textAlign = 'center';
+      const y = f.y - 50 * age;
+      ctx.globalAlpha = age < 0.65 ? 1 : 1 - (age - 0.65) / 0.35;
+      ctx.fillStyle   = f.color;
+      ctx.font        = `bold ${f.size}px -apple-system, SF Pro Rounded, sans-serif`;
+      ctx.textAlign   = 'center';
+      ctx.textBaseline= 'middle';
       ctx.fillText(f.text, f.x, y);
-      ctx.globalAlpha = 1;
+      ctx.globalAlpha  = 1;
+      ctx.textBaseline = 'alphabetic';
       return true;
     });
   }
 
-  // ── Piece Preview (for tray) ─────────────────────────────────────────────
-  drawPiecePreview(canvas, piece, themeName, scale=1, used=false) {
+  // ── PIECE PREVIEW (tray slots) ─────────────────────────────────────────────
+  drawPiecePreview(canvas, piece, themeName) {
     if (!canvas || !piece) return;
     const t   = THEMES[themeName] || THEMES.dark;
     const ctx = canvas.getContext('2d');
-    const cs  = Math.floor(canvas.width / 5);
+    const pw  = getPieceWidth(piece);
+    const ph  = getPieceHeight(piece);
+
+    // Determine cell size to fit piece in canvas with padding
+    const pad   = 6;
+    const fitW  = (canvas.width  - pad * 2) / pw;
+    const fitH  = (canvas.height - pad * 2) / ph;
+    const cs    = Math.floor(Math.min(fitW, fitH, canvas.width / 4));
+    const ox    = Math.floor((canvas.width  - pw * cs) / 2);
+    const oy    = Math.floor((canvas.height - ph * cs) / 2);
 
     ctx.clearRect(0, 0, canvas.width, canvas.height);
-    if (used) {
-      ctx.globalAlpha = 0.3;
-    }
-
-    const pw = getPieceWidth(piece);
-    const ph = getPieceHeight(piece);
-    const ox = Math.floor((canvas.width  - pw * cs) / 2);
-    const oy = Math.floor((canvas.height - ph * cs) / 2);
 
     for (const [dx, dy] of piece.cells) {
-      const color = t.blocks[piece.color % t.blocks.length];
-      this._drawBlock(ctx, 0, 0, cs, color, scale, 1, t);
-      // Actually draw at correct offsets
-      const pad=2, x=ox+dx*cs+pad, y=oy+dy*cs+pad, w=cs-pad*2, h=cs-pad*2, r=Math.max(2,cs*0.18);
-      ctx.shadowColor = color+'66';
-      ctx.shadowBlur = t.glowBlocks ? cs*0.4 : cs*0.12;
+      const color  = t.blocks[piece.color % t.blocks.length];
+      const xb     = ox + dx * cs;
+      const yb     = oy + dy * cs;
+      const bpad   = 2;
+      const bw     = cs - bpad * 2;
+      const bh     = cs - bpad * 2;
+      const radius = Math.max(2, cs * 0.18);
+
+      ctx.shadowColor = color + '55';
+      ctx.shadowBlur  = t.glowBlocks ? cs * 0.3 : cs * 0.08;
+
       ctx.fillStyle = color;
-      this._roundRect(ctx, x, y, w, h, r);
+      this._rrect(ctx, xb + bpad, yb + bpad, bw, bh, radius);
       ctx.fill();
-      ctx.shadowBlur=0;
-      ctx.shadowColor='transparent';
-      const grad=ctx.createLinearGradient(x,y,x,y+h*0.5);
-      grad.addColorStop(0,'rgba(255,255,255,0.35)');
-      grad.addColorStop(1,'rgba(255,255,255,0)');
-      ctx.fillStyle=grad;
-      this._roundRect(ctx,x+1,y+1,w-2,h*0.45,r-1);
+
+      ctx.shadowBlur = 0; ctx.shadowColor = 'transparent';
+
+      const grad = ctx.createLinearGradient(xb+bpad, yb+bpad, xb+bpad, yb+bpad+bh*0.45);
+      grad.addColorStop(0, 'rgba(255,255,255,0.35)');
+      grad.addColorStop(1, 'rgba(255,255,255,0)');
+      ctx.fillStyle = grad;
+      this._rrect(ctx, xb+bpad+1, yb+bpad+1, bw-2, bh*0.42, radius-1);
       ctx.fill();
     }
-    ctx.globalAlpha = 1;
   }
 
-  // ── Effects ──────────────────────────────────────────────────────────────
-  triggerLineClear(rows, cols, t) {
-    const { cellSize, boardW, boardH } = this;
-    const theme = THEMES[this.theme];
+  // ── EFFECTS ───────────────────────────────────────────────────────────────
+  triggerLineClear(rows, cols) {
     const now = Date.now();
-
     rows.forEach(r => this.clearAnim.push({ type:'row', index:r, start:now }));
     cols.forEach(c => this.clearAnim.push({ type:'col', index:c, start:now }));
 
-    // Particles
-    const emitPoints = [];
+    const t = THEMES[this.theme];
+    const { cellSize, gridSize } = this;
+
     rows.forEach(r => {
-      for (let c=0;c<this.gridSize;c++) emitPoints.push({ x:c*cellSize+cellSize/2, y:r*cellSize+cellSize/2 });
+      for (let c = 0; c < gridSize; c++) this._burst(c * cellSize + cellSize/2, r * cellSize + cellSize/2, t);
     });
     cols.forEach(c => {
-      for (let r=0;r<this.gridSize;r++) emitPoints.push({ x:c*cellSize+cellSize/2, y:r*cellSize+cellSize/2 });
+      for (let r = 0; r < gridSize; r++) this._burst(c * cellSize + cellSize/2, r * cellSize + cellSize/2, t);
     });
 
-    emitPoints.forEach(pt => {
-      for (let i=0;i<6;i++) {
-        const angle = Math.random()*Math.PI*2;
-        const speed = 1 + Math.random()*3;
-        this.particles.push({
-          x:pt.x, y:pt.y,
-          vx:Math.cos(angle)*speed,
-          vy:Math.sin(angle)*speed - 2,
-          gravity:0.15,
-          color:theme?.particleColor || '#5b7cff',
-          size:2+Math.random()*4,
-          born:now,
-          life:600+Math.random()*400,
-        });
-      }
-    });
-
-    this.shakeTime   = 8;
-    this.shakeAmount = rows.length + cols.length > 2 ? 6 : 3;
+    this.shakeTime = 7;
+    this.shakeAmt  = rows.length + cols.length > 2 ? 5 : 3;
   }
 
-  addFloatText(text, x, y, color, size=20) {
-    this.floatTexts.push({ text, x, y, color, size, born:Date.now(), life:1000 });
+  _burst(x, y, t) {
+    const now = Date.now();
+    for (let i = 0; i < 5; i++) {
+      const angle = Math.random() * Math.PI * 2;
+      const speed = 1 + Math.random() * 2.5;
+      this.particles.push({
+        x, y,
+        vx: Math.cos(angle) * speed,
+        vy: Math.sin(angle) * speed - 1.5,
+        gravity: 0.12,
+        color: t?.particleColor || '#5b7cfa',
+        size:  2 + Math.random() * 3,
+        born:  now,
+        life:  500 + Math.random() * 400,
+      });
+    }
+  }
+
+  addFloatText(text, x, y, color, size = 20) {
+    this.floatTexts.push({ text, x, y, color, size, born: Date.now(), life: 900 });
   }
 
   animatePlacement(piece, col, row) {
-    // Scale-down pop effect
-    for (const [dx,dy] of piece.cells) {
-      const r = row+dy, c = col+dx;
-      if (r>=0&&r<this.gridSize&&c>=0&&c<this.gridSize) {
-        this.blockScale[r][c] = 1.3;
-        setTimeout(()=>{ if(this.blockScale[r]) this.blockScale[r][c]=1; }, 150);
+    for (const [dx, dy] of piece.cells) {
+      const r = row + dy, c = col + dx;
+      if (r >= 0 && r < this.gridSize && c >= 0 && c < this.gridSize) {
+        this.blockScale[r][c] = 1.25;
+        setTimeout(() => { if (this.blockScale[r]) this.blockScale[r][c] = 1; }, 140);
       }
     }
   }
 
-  // ── Utils ────────────────────────────────────────────────────────────────
-  _roundRect(ctx, x, y, w, h, r) {
+  // ── UTILS ─────────────────────────────────────────────────────────────────
+  _rrect(ctx, x, y, w, h, r) {
     if (ctx.roundRect) {
-      ctx.beginPath();
-      ctx.roundRect(x, y, w, h, r);
+      ctx.beginPath(); ctx.roundRect(x, y, w, h, r);
     } else {
       ctx.beginPath();
-      ctx.moveTo(x+r,y);
-      ctx.lineTo(x+w-r,y);
-      ctx.quadraticCurveTo(x+w,y,x+w,y+r);
-      ctx.lineTo(x+w,y+h-r);
-      ctx.quadraticCurveTo(x+w,y+h,x+w-r,y+h);
-      ctx.lineTo(x+r,y+h);
-      ctx.quadraticCurveTo(x,y+h,x,y+h-r);
-      ctx.lineTo(x,y+r);
-      ctx.quadraticCurveTo(x,y,x+r,y);
+      ctx.moveTo(x + r, y);
+      ctx.lineTo(x + w - r, y); ctx.quadraticCurveTo(x + w, y, x + w, y + r);
+      ctx.lineTo(x + w, y + h - r); ctx.quadraticCurveTo(x + w, y + h, x + w - r, y + h);
+      ctx.lineTo(x + r, y + h); ctx.quadraticCurveTo(x, y + h, x, y + h - r);
+      ctx.lineTo(x, y + r); ctx.quadraticCurveTo(x, y, x + r, y);
       ctx.closePath();
     }
   }
@@ -342,7 +353,7 @@ class Renderer {
   getCellFromXY(x, y) {
     const col = Math.floor(x / this.cellSize);
     const row = Math.floor(y / this.cellSize);
-    if (col<0||col>=this.gridSize||row<0||row>=this.gridSize) return null;
+    if (col < 0 || col >= this.gridSize || row < 0 || row >= this.gridSize) return null;
     return { col, row };
   }
 }

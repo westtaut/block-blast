@@ -1,78 +1,88 @@
-// ─── MAIN APP CONTROLLER ─────────────────────────────────────────────────────
-
+// ─── BLOCK BLAST — MAIN CONTROLLER ──────────────────────────────────────────
 'use strict';
 
-let engine      = null;
-let renderer    = null;
-let currentTheme= 'dark';
-let currentMode = 'classic';
-let currentLevel= null;
-let animFrameId = null;
-let timerInterval = null;
-let timeLeft    = 0;
-let isPaused    = false;
+let engine       = null;
+let renderer     = null;
+let currentTheme = 'dark';
+let currentMode  = 'classic';
+let currentLevel = null;
+let animId       = null;
+let timerInt     = null;
+let timeLeft     = 0;
+let isPaused     = false;
 
-// Drag state
-let drag = {
-  active: false,
-  pieceIndex: null,
-  piece: null,
-  startX: 0, startY: 0,
-  currentX: 0, currentY: 0,
-  gridCol: null, gridRow: null,
-  offsetX: 0, offsetY: 0,
-  ghost: null,
+// ── Drag State ────────────────────────────────────────────────────────────────
+const drag = {
+  active:     false,
+  idx:        null,
+  piece:      null,
+  snapCol:    null,   // current snapped grid column (top-left of piece)
+  snapRow:    null,   // current snapped grid row
+  valid:      false,  // is current snap position valid?
+  pointerX:   0,
+  pointerY:   0,
 };
 
-// ── DOM refs ──────────────────────────────────────────────────────────────────
+// ── DOM shortcuts ─────────────────────────────────────────────────────────────
 const $ = id => document.getElementById(id);
-const screens = ['screen-menu','screen-modes','screen-story','screen-game',
-                 'screen-gameover','screen-themes','screen-stats','screen-achievements'];
+const SCREENS = ['screen-menu','screen-modes','screen-story','screen-game',
+                 'screen-gameover','screen-themes','screen-stats',
+                 'screen-achievements','screen-settings'];
 
 function showScreen(id) {
-  screens.forEach(s => {
+  SCREENS.forEach(s => {
     const el = $(s);
-    if (el) {
-      el.classList.toggle('active', s === id);
-      el.classList.toggle('hidden', s !== id);
-    }
+    if (!el) return;
+    el.classList.toggle('active', s === id);
+    el.classList.toggle('hidden', s !== id);
   });
   TG.hideMainButton();
 }
 
-// ── Init ──────────────────────────────────────────────────────────────────────
+// ── INIT ──────────────────────────────────────────────────────────────────────
 async function init() {
   TG.init();
   await Storage.load();
+  SoundEngine.init();
 
   currentTheme = Storage.get().selectedTheme || 'dark';
   applyTheme(currentTheme);
 
+  // Apply saved sound settings
+  const d = Storage.get();
+  SoundEngine.musicEnabled = d.settings?.music !== false;
+  SoundEngine.sfxEnabled   = d.settings?.sfx   !== false;
+
   buildMenuUI();
   showScreen('screen-menu');
-  setupEventListeners();
+  setupListeners();
 
-  // Animate menu in
-  setTimeout(() => document.querySelector('.menu-card')?.classList.add('visible'), 100);
+  // Unlock music on first touch
+  document.addEventListener('pointerdown', () => {
+    SoundEngine.resume();
+    if (SoundEngine.musicEnabled && !SoundEngine.musicPlaying) {
+      SoundEngine.startMusic();
+    }
+  }, { once: true });
 }
 
-// ── Menu UI ────────────────────────────────────────────────────────────────────
+// ── MENU ──────────────────────────────────────────────────────────────────────
 function buildMenuUI() {
-  const data = Storage.get();
+  const d    = Storage.get();
   const name = TG.getFirstName();
-  const el = $('menu-username');
-  if (el) el.textContent = name;
-  const av = $('menu-avatar');
-  if (av) av.textContent = name.charAt(0).toUpperCase();
-  const coins = $('menu-coins');
-  if (coins) coins.textContent = data.coins || 0;
-  const best = $('menu-best');
-  if (best) best.textContent = (data.bestScore || 0).toLocaleString();
-  const story = $('menu-story');
-  if (story) story.textContent = `${data.storyProgress || 0}/20`;
+  setEl('menu-username', name);
+  setEl('menu-avatar-char', name.charAt(0).toUpperCase());
+  setEl('menu-coins',   d.coins || 0);
+  setEl('menu-best',    (d.bestScore || 0).toLocaleString());
+  setEl('menu-story-stat', `${d.storyProgress || 0}/20`);
 }
 
-// ── Start Game ─────────────────────────────────────────────────────────────────
+function setEl(id, val) {
+  const el = $(id);
+  if (el) el.textContent = val;
+}
+
+// ── START GAME ─────────────────────────────────────────────────────────────────
 function startGame(mode, level = null) {
   currentMode  = mode;
   currentLevel = level;
@@ -80,104 +90,122 @@ function startGame(mode, level = null) {
 
   const gridSize = level?.grid || (mode === 'hard' ? 10 : 8);
 
-  // Setup engine
   engine = new GameEngine({
-    gridSize,
-    mode,
-    level,
-    onScore:    handleScore,
-    onGameOver: handleGameOver,
-    onLineClear:handleLineClear,
-    onLevelWin: handleLevelWin,
+    gridSize, mode, level,
+    onScore:     handleScore,
+    onGameOver:  handleGameOver,
+    onLineClear: handleLineClear,
+    onLevelWin:  handleLevelWin,
   });
 
-  // Setup renderer
   const canvas = $('game-canvas');
   if (!canvas) return;
 
-  if (renderer) renderer.theme = currentTheme;
-  else renderer = new Renderer(canvas, { theme: currentTheme, gridSize });
-  renderer.gridSize = gridSize;
-  renderer.theme = currentTheme;
-  renderer.resize();
+  if (!renderer) {
+    renderer = new Renderer(canvas, { theme: currentTheme, gridSize });
+  } else {
+    renderer.gridSize = gridSize;
+    renderer.theme    = currentTheme;
+    renderer.resize();
+  }
 
-  // Reset block animations
-  renderer.blockScale = Array.from({length:gridSize},()=>Array(gridSize).fill(1));
-  renderer.blockAlpha = Array.from({length:gridSize},()=>Array(gridSize).fill(1));
+  renderer.gridSize   = gridSize;
+  renderer.theme      = currentTheme;
   renderer.particles  = [];
   renderer.clearAnim  = [];
   renderer.floatTexts = [];
+  renderer.blockScale = Array.from({length:gridSize}, ()=>Array(gridSize).fill(1));
+  renderer.blockAlpha = Array.from({length:gridSize}, ()=>Array(gridSize).fill(1));
 
-  // UI
   updateGameUI();
-  renderPieceTray();
+  renderTray();
   showScreen('screen-game');
 
+  // Undo button reset
+  const undoBtn = $('btn-undo');
+  if (undoBtn) undoBtn.disabled = false;
+
   // Timer
-  clearInterval(timerInterval);
-  if (mode === 'timed' || level?.objective?.type?.includes('timed')) {
+  clearInterval(timerInt);
+  const hasTimed = mode === 'timed' || level?.objective?.type?.includes('timed');
+  if (hasTimed) {
     timeLeft = level?.objective?.time || 180;
     updateTimer();
-    timerInterval = setInterval(() => {
+    $('timer-display').style.display = 'block';
+    timerInt = setInterval(() => {
       if (!isPaused && !engine.gameOver && !engine.won) {
         timeLeft--;
         updateTimer();
         if (timeLeft <= 0) {
-          clearInterval(timerInterval);
+          clearInterval(timerInt);
           handleGameOver(engine.score);
         }
       }
     }, 1000);
+  } else {
+    $('timer-display').style.display = 'none';
   }
 
-  // Level info banner
-  if (level) {
-    showLevelBanner(level);
-  }
+  if (level) showLevelBanner(level);
 
-  // Start loop
-  if (animFrameId) cancelAnimationFrame(animFrameId);
-  gameLoop();
+  if (animId) cancelAnimationFrame(animId);
+  loop();
+
+  if (SoundEngine.musicEnabled) SoundEngine.startMusic();
 }
 
-function gameLoop() {
+function loop() {
   if (!engine || !renderer) return;
   renderer.draw(engine, drag.active ? drag : null);
-  animFrameId = requestAnimationFrame(gameLoop);
+  animId = requestAnimationFrame(loop);
 }
 
-// ── Score / Events ─────────────────────────────────────────────────────────────
+// ── SCORE / EVENTS ─────────────────────────────────────────────────────────────
 function handleScore(total, gained, cleared) {
-  $('score-value').textContent = total;
-  if (gained > 0) {
+  const el = $('score-val');
+  if (el) {
+    el.textContent = total;
+    el.classList.remove('pop');
+    void el.offsetWidth;
+    el.classList.add('pop');
+  }
+  if (gained > 0 && renderer) {
     const canvas = $('game-canvas');
-    const cx = canvas ? canvas.width/2 : 150;
-    const cy = canvas ? canvas.height/2 : 150;
-    let label = '+' + gained;
-    if (engine.combo > 1) label += ` ×${engine.combo}`;
-    renderer.addFloatText(label, cx, cy - 40, THEMES[currentTheme]?.accent || '#5b7cff', 22);
+    if (canvas) {
+      renderer.addFloatText('+' + gained + (engine.combo > 1 ? ` ×${engine.combo}` : ''),
+        canvas.width / 2, canvas.height * 0.38,
+        THEMES[currentTheme]?.accent || '#5b7cfa', 20);
+    }
   }
   if (engine.combo > 1) {
-    $('combo-display').textContent = `×${engine.combo} COMBO`;
-    $('combo-display').classList.add('visible');
-    setTimeout(()=>$('combo-display').classList.remove('visible'), 1500);
+    const cf = $('combo-flash');
+    if (cf) {
+      cf.textContent = `×${engine.combo} COMBO`;
+      cf.classList.remove('show');
+      void cf.offsetWidth;
+      cf.classList.add('show');
+      clearTimeout(cf._t);
+      cf._t = setTimeout(() => cf.classList.remove('show'), 1200);
+    }
+    SoundEngine.combo(engine.combo);
   }
-  renderPieceTray();
-  checkAchievements(engine, Storage).then(unlocked => {
-    unlocked.forEach(a => showAchievementToast(a));
-  });
+  renderTray();
+  updateObjProgress();
+  checkAchievements(engine, Storage).then(arr => arr.forEach(showAchToast));
 }
 
 function handleLineClear({ rows, cols }) {
   renderer.triggerLineClear(rows, cols, currentTheme);
   TG.haptic(rows.length + cols.length >= 3 ? 'heavy' : 'medium');
-  updateObjectiveProgress();
+  SoundEngine.lineClear(rows.length + cols.length);
 }
 
 function handleGameOver(score) {
-  clearInterval(timerInterval);
-  cancelAnimationFrame(animFrameId);
+  clearInterval(timerInt);
+  cancelAnimationFrame(animId);
   TG.haptic('error');
+  SoundEngine.gameOver();
+  SoundEngine.stopMusic();
 
   Storage.addScore(score, currentMode);
   Storage.updateStats({
@@ -187,297 +215,353 @@ function handleGameOver(score) {
     perfectClears: engine.perfectClears,
   });
 
-  const data = Storage.get();
-  $('go-score').textContent    = score;
-  $('go-best').textContent     = data.bestScore;
-  $('go-lines').textContent    = engine.linesCleared;
-  $('go-combos').textContent   = engine.maxCombo;
-  $('go-mode').textContent     = modeLabel(currentMode);
-  $('go-new-best').style.display = score >= data.bestScore && score > 0 ? 'block' : 'none';
-
-  setTimeout(() => showScreen('screen-gameover'), 400);
+  const d = Storage.get();
+  setEl('go-score',  score);
+  setEl('go-best',   d.bestScore);
+  setEl('go-lines',  engine.linesCleared);
+  setEl('go-combos', engine.maxCombo);
+  setEl('go-pieces', engine.piecesPlaced);
+  setEl('go-mode',   modeLabel(currentMode));
+  const nb = $('go-new-best');
+  if (nb) nb.style.display = (score >= d.bestScore && score > 0) ? 'flex' : 'none';
+  setTimeout(() => showScreen('screen-gameover'), 350);
 }
 
 async function handleLevelWin(level, score) {
-  clearInterval(timerInterval);
-  cancelAnimationFrame(animFrameId);
+  clearInterval(timerInt);
+  cancelAnimationFrame(animId);
   TG.haptic('success');
-
+  SoundEngine.levelWin();
+  SoundEngine.stopMusic();
   const stars = await Storage.completeLevel(level.id, score);
   await Storage.addScore(score, 'story');
-
-  showLevelWinScreen(level, score, stars);
+  showWinScreen(level, score, stars);
 }
 
-// ── Piece Tray ─────────────────────────────────────────────────────────────────
-function renderPieceTray() {
-  if (!engine) return;
+// ── TRAY ──────────────────────────────────────────────────────────────────────
+function renderTray() {
+  if (!engine || !renderer) return;
   for (let i = 0; i < 3; i++) {
-    const canvas = $(`piece-canvas-${i}`);
-    const wrap   = $(`piece-wrap-${i}`);
-    if (!canvas || !wrap) continue;
-    const piece  = engine.pieces[i];
-    if (!piece) {
-      wrap.classList.add('used');
-      canvas.getContext('2d').clearRect(0,0,canvas.width,canvas.height);
-    } else {
-      wrap.classList.remove('used');
-      renderer.drawPiecePreview(canvas, piece, currentTheme);
+    const canvas = $(`pc-${i}`);
+    const slot   = $(`ps-${i}`);
+    if (!canvas || !slot) continue;
+    const piece = engine.pieces[i];
+    slot.classList.toggle('used', !piece);
+    if (piece) renderer.drawPiecePreview(canvas, piece, currentTheme);
+    else canvas.getContext('2d').clearRect(0,0,canvas.width,canvas.height);
+  }
+}
+
+// ── DRAG & DROP (MAGNETIC SNAP) ───────────────────────────────────────────────
+function setupDrag() {
+  for (let i = 0; i < 3; i++) {
+    const slot = $(`ps-${i}`);
+    if (!slot) continue;
+    slot.addEventListener('pointerdown', e => startDrag(e, i), { passive: false });
+  }
+
+  document.addEventListener('pointermove', onDragMove, { passive: true });
+  document.addEventListener('pointerup',   onDragEnd);
+  document.addEventListener('pointercancel', cancelDrag);
+}
+
+function startDrag(e, idx) {
+  e.preventDefault();
+  const piece = engine?.pieces[idx];
+  if (!piece) return;
+
+  drag.active = true;
+  drag.idx    = idx;
+  drag.piece  = piece;
+  drag.snapCol= null;
+  drag.snapRow= null;
+  drag.valid  = false;
+
+  const pt = e.touches ? e.touches[0] : e;
+  drag.pointerX = pt.clientX;
+  drag.pointerY = pt.clientY;
+
+  $(`ps-${idx}`)?.classList.add('dragging');
+  TG.haptic('light');
+  SoundEngine.snap();
+}
+
+function onDragMove(e) {
+  if (!drag.active) return;
+  const pt = e.touches ? e.touches[0] : e;
+  drag.pointerX = pt.clientX;
+  drag.pointerY = pt.clientY;
+  updateSnapPosition();
+}
+
+function updateSnapPosition() {
+  const canvas = $('game-canvas');
+  if (!canvas || !renderer || !drag.piece) return;
+
+  const rect = canvas.getBoundingClientRect();
+  const cs   = renderer.cellSize;
+
+  // Pointer offset: lift piece slightly above finger for visibility
+  const lx = drag.pointerX - rect.left;
+  const ly = drag.pointerY - rect.top - cs * 1.2; // lift 1.2 cells above touch point
+
+  // Find grid cell under the hotspot (top-left of piece bounding box)
+  const rawCol = Math.floor(lx / cs);
+  const rawRow = Math.floor(ly / cs);
+
+  // Magnetic snap: find nearest valid position within ±1 cell radius
+  let bestCol = null, bestRow = null;
+  let bestDist = Infinity;
+
+  for (let dr = -1; dr <= 1; dr++) {
+    for (let dc = -1; dc <= 1; dc++) {
+      const col = rawCol + dc;
+      const row = rawRow + dr;
+      if (engine.canPlace(drag.piece, col, row)) {
+        // Distance from ideal center
+        const cx = (col + getPieceWidth(drag.piece)  / 2) * cs;
+        const cy = (row + getPieceHeight(drag.piece) / 2) * cs;
+        const dist = Math.hypot(lx - cx, ly - cy);
+        if (dist < bestDist) {
+          bestDist = dist;
+          bestCol  = col;
+          bestRow  = row;
+        }
+      }
     }
   }
+
+  // If no valid snap found nearby, just show at raw position
+  if (bestCol !== null) {
+    drag.snapCol = bestCol;
+    drag.snapRow = bestRow;
+    drag.valid   = true;
+  } else {
+    drag.snapCol = rawCol;
+    drag.snapRow = rawRow;
+    drag.valid   = false;
+  }
 }
 
-// ── Drag & Drop ─────────────────────────────────────────────────────────────────
-function setupDragListeners() {
-  const tray = $('piece-tray');
-  if (!tray) return;
+function onDragEnd() {
+  if (!drag.active) return;
 
-  function onPiecePointerDown(e, idx) {
-    e.preventDefault();
-    const piece = engine?.pieces[idx];
-    if (!piece) return;
+  const placed = drag.valid && drag.snapCol !== null && drag.snapRow !== null
+    ? engine.placePiece(drag.idx, drag.snapCol, drag.snapRow)
+    : false;
+
+  if (placed) {
+    renderer.animatePlacement(drag.piece, drag.snapCol, drag.snapRow);
     TG.haptic('light');
-
-    const pt = e.touches ? e.touches[0] : e;
-    drag.active     = true;
-    drag.pieceIndex = idx;
-    drag.piece      = piece;
-    drag.startX     = pt.clientX;
-    drag.startY     = pt.clientY;
-    drag.currentX   = pt.clientX;
-    drag.currentY   = pt.clientY;
-    drag.gridCol    = null;
-    drag.gridRow    = null;
-
-    // Show floating drag clone
-    showDragGhost(piece, pt.clientX, pt.clientY);
+    SoundEngine.place();
+  } else {
+    TG.haptic('warning');
+    SoundEngine.error();
   }
 
-  for (let i=0;i<3;i++) {
-    const wrap = $(`piece-wrap-${i}`);
-    if (!wrap) continue;
-    wrap.addEventListener('pointerdown', e => onPiecePointerDown(e, i), {passive:false});
-  }
+  $(`ps-${drag.idx}`)?.classList.remove('dragging');
+  drag.active = false;
+  drag.piece  = null;
+  drag.idx    = null;
+  drag.snapCol= null;
+  drag.snapRow= null;
+  drag.valid  = false;
+
+  renderTray();
 }
 
-let dragGhostEl = null;
-
-function showDragGhost(piece, x, y) {
-  if (dragGhostEl) dragGhostEl.remove();
-  const t = THEMES[currentTheme] || THEMES.dark;
-  const cs = Math.floor(Math.min(window.innerWidth,420) / (engine.gridSize + 2));
-
-  dragGhostEl = document.createElement('canvas');
-  const pw = getPieceWidth(piece), ph = getPieceHeight(piece);
-  dragGhostEl.width  = (pw+1)*cs;
-  dragGhostEl.height = (ph+1)*cs;
-  dragGhostEl.style.cssText = `
-    position:fixed;pointer-events:none;z-index:9999;
-    left:${x - dragGhostEl.width/2}px;
-    top:${y - dragGhostEl.height/2 - 30}px;
-    opacity:0.95;transform:scale(1.15);transition:none;
-  `;
-  renderer.drawPiecePreview(dragGhostEl, piece, currentTheme);
-  document.body.appendChild(dragGhostEl);
+function cancelDrag() {
+  $(`ps-${drag.idx}`)?.classList.remove('dragging');
+  drag.active = false;
+  drag.piece  = null;
 }
 
-function moveDragGhost(x, y) {
-  if (!dragGhostEl) return;
-  dragGhostEl.style.left = `${x - dragGhostEl.width/2}px`;
-  dragGhostEl.style.top  = `${y - dragGhostEl.height/2 - 30}px`;
-}
-
-function setupPointerListeners() {
-  document.addEventListener('pointermove', e => {
-    if (!drag.active) return;
-    const pt = e.touches ? e.touches[0] : e;
-    drag.currentX = pt.clientX;
-    drag.currentY = pt.clientY;
-    moveDragGhost(pt.clientX, pt.clientY);
-
-    // Compute grid cell under finger
-    const canvas = $('game-canvas');
-    if (!canvas) return;
-    const rect = canvas.getBoundingClientRect();
-    const lx = pt.clientX - rect.left;
-    const ly = pt.clientY - rect.top - 30; // offset up so not covered by finger
-
-    const cell = renderer.getCellFromXY(lx, ly);
-    if (cell) {
-      // Anchor to top-left of piece
-      const piece = drag.piece;
-      drag.gridCol = cell.col;
-      drag.gridRow = cell.row;
-    } else {
-      drag.gridCol = null;
-      drag.gridRow = null;
-    }
-  }, {passive:true});
-
-  document.addEventListener('pointerup', e => {
-    if (!drag.active) return;
-    const placed = tryPlaceDrag();
-    if (dragGhostEl) { dragGhostEl.remove(); dragGhostEl = null; }
-    if (!placed) TG.haptic('warning');
-    drag.active = false;
-    drag.piece  = null;
-    renderPieceTray();
-  });
-
-  document.addEventListener('pointercancel', () => {
-    if (dragGhostEl) { dragGhostEl.remove(); dragGhostEl = null; }
-    drag.active = false;
-    drag.piece  = null;
-  });
-}
-
-function tryPlaceDrag() {
-  if (!engine || drag.gridCol === null || drag.gridRow === null) return false;
-  const ok = engine.placePiece(drag.pieceIndex, drag.gridCol, drag.gridRow);
-  if (ok) {
-    renderer.animatePlacement(drag.piece, drag.gridCol, drag.gridRow);
-    TG.haptic('light');
-  }
-  return ok;
-}
-
-// ── Timer UI ──────────────────────────────────────────────────────────────────
+// ── TIMER / OBJECTIVE ─────────────────────────────────────────────────────────
 function updateTimer() {
   const el = $('timer-display');
   if (!el) return;
-  const m = Math.floor(timeLeft/60), s = timeLeft%60;
+  const m = Math.floor(timeLeft / 60), s = timeLeft % 60;
   el.textContent = `${m}:${s.toString().padStart(2,'0')}`;
-  if (timeLeft <= 30) el.classList.add('urgent');
-  else el.classList.remove('urgent');
+  el.classList.toggle('urgent', timeLeft <= 30);
 }
 
 function updateGameUI() {
   if (!engine) return;
-  $('score-value').textContent = engine.score;
-  const best = Storage.get().bestScore;
-  $('best-value').textContent  = best;
-
-  // Show/hide timer
-  const timerEl = $('timer-display');
-  if (timerEl) {
-    const hasTimed = currentMode === 'timed' || currentLevel?.objective?.type?.includes('timed');
-    timerEl.style.display = hasTimed ? 'block' : 'none';
-  }
-
-  // Objective
-  updateObjectiveProgress();
+  setEl('score-val', engine.score);
+  setEl('best-val',  Storage.get().bestScore);
+  updateObjProgress();
 }
 
-function updateObjectiveProgress() {
-  const el = $('objective-bar');
-  if (!el || !currentLevel) { if(el) el.style.display='none'; return; }
-  el.style.display = 'block';
+function updateObjProgress() {
+  const bar = $('objective-bar');
+  if (!bar || !currentLevel) { if(bar) bar.style.display='none'; return; }
+  bar.style.display = 'block';
   const obj = currentLevel.objective;
-  $('obj-label').textContent = obj.label;
-  let progress = 0;
-  switch(obj.type) {
-    case 'score': case 'score_timed': progress = Math.min(1, engine.score / obj.target); break;
-    case 'lines': case 'lines_timed': progress = Math.min(1, engine.linesCleared / obj.target); break;
-    case 'columns': progress = Math.min(1, engine.columnsCleared / obj.target); break;
-    case 'combo':   progress = Math.min(1, engine.maxCombo / obj.target); break;
-    case 'pieces':  progress = Math.min(1, engine.piecesPlaced / obj.target); break;
-    default: progress = 0;
+  setEl('obj-label', obj.label);
+  let pct = 0;
+  switch (obj.type) {
+    case 'score': case 'score_timed': pct = engine.score / obj.target; break;
+    case 'lines': case 'lines_timed': pct = engine.linesCleared / obj.target; break;
+    case 'columns': pct = engine.columnsCleared / obj.target; break;
+    case 'combo':   pct = engine.maxCombo / obj.target; break;
+    case 'pieces':  pct = engine.piecesPlaced / obj.target; break;
   }
-  $('obj-fill').style.width = (progress * 100) + '%';
+  const fill = $('obj-fill');
+  if (fill) fill.style.width = Math.min(100, pct * 100) + '%';
 }
 
-// ── Level Banner ──────────────────────────────────────────────────────────────
-function showLevelBanner(level) {
-  const banner = $('level-banner');
-  if (!banner) return;
-  $('banner-title').textContent = `Level ${level.id}: ${level.title}`;
-  $('banner-story').textContent = level.story;
-  $('banner-obj').textContent   = `🎯 ${level.objective.label}`;
-  banner.classList.add('show');
-  setTimeout(() => banner.classList.remove('show'), 3500);
+// ── LEVEL BANNER ──────────────────────────────────────────────────────────────
+function showLevelBanner(lv) {
+  const b = $('level-banner');
+  if (!b) return;
+  setEl('banner-level', `Level ${lv.id}`);
+  setEl('banner-title', lv.title);
+  setEl('banner-story', lv.story);
+  setEl('banner-obj',   `🎯 ${lv.objective.label}`);
+  b.classList.add('show');
+  setTimeout(() => b.classList.remove('show'), 3500);
 }
 
-// ── Level Win ──────────────────────────────────────────────────────────────────
-function showLevelWinScreen(level, score, stars) {
+// ── WIN SCREEN ────────────────────────────────────────────────────────────────
+function showWinScreen(lv, score, stars) {
   const win = $('level-win');
   if (!win) { handleGameOver(score); return; }
-  $('win-title').textContent = level.title;
-  $('win-score').textContent = score;
-  $('win-reward').textContent= '+' + level.reward + ' 🪙';
-  const starEls = win.querySelectorAll('.star');
-  starEls.forEach((s,i) => s.classList.toggle('lit', i < stars));
+  setEl('win-name',   lv.title);
+  setEl('win-score',  score);
+  setEl('win-reward', `+${lv.reward}🪙`);
+  win.querySelectorAll('.win-star').forEach((s, i) => {
+    s.classList.toggle('lit', i < stars);
+  });
   win.classList.add('show');
 }
 
-// ── Achievement Toast ──────────────────────────────────────────────────────────
-function showAchievementToast(achievement) {
-  const t = document.createElement('div');
-  t.className = 'achievement-toast';
-  t.innerHTML = `<span class="ach-icon">🏆</span><div><div class="ach-name">${achievement.label}</div><div class="ach-desc">${achievement.desc}</div></div><span class="ach-coins">+${achievement.coins}🪙</span>`;
-  document.body.appendChild(t);
-  requestAnimationFrame(() => t.classList.add('show'));
-  setTimeout(() => { t.classList.remove('show'); setTimeout(()=>t.remove(),500); }, 3000);
+// ── SETTINGS ──────────────────────────────────────────────────────────────────
+function buildSettingsScreen() {
+  const d = Storage.get();
+  const settings = d.settings || {};
+
+  // Music toggle
+  const musicToggle = $('toggle-music');
+  if (musicToggle) {
+    musicToggle.checked = settings.music !== false;
+    musicToggle.onchange = async () => {
+      SoundEngine.musicEnabled = musicToggle.checked;
+      if (musicToggle.checked) SoundEngine.startMusic();
+      else SoundEngine.stopMusic();
+      await saveSettings({ music: musicToggle.checked });
+    };
+  }
+
+  // SFX toggle
+  const sfxToggle = $('toggle-sfx');
+  if (sfxToggle) {
+    sfxToggle.checked = settings.sfx !== false;
+    sfxToggle.onchange = async () => {
+      SoundEngine.sfxEnabled = sfxToggle.checked;
+      await saveSettings({ sfx: sfxToggle.checked });
+    };
+  }
+
+  // Music volume
+  const musicVol = $('slider-music-vol');
+  if (musicVol) {
+    musicVol.value = settings.musicVol !== undefined ? settings.musicVol : 70;
+    musicVol.oninput = () => {
+      SoundEngine.setMusicVolume(musicVol.value / 100);
+      saveSettings({ musicVol: parseInt(musicVol.value) });
+    };
+  }
+
+  // SFX volume
+  const sfxVol = $('slider-sfx-vol');
+  if (sfxVol) {
+    sfxVol.value = settings.sfxVol !== undefined ? settings.sfxVol : 80;
+    sfxVol.oninput = () => {
+      SoundEngine.setSfxVolume(sfxVol.value / 100);
+      saveSettings({ sfxVol: parseInt(sfxVol.value) });
+    };
+  }
+
+  // Haptic toggle
+  const hapticToggle = $('toggle-haptic');
+  if (hapticToggle) {
+    hapticToggle.checked = settings.haptic !== false;
+    hapticToggle.onchange = async () => {
+      await saveSettings({ haptic: hapticToggle.checked });
+    };
+  }
 }
 
-// ── Mode Labels ───────────────────────────────────────────────────────────────
-function modeLabel(m) {
-  return { classic:'Classic',timed:'Timed',challenge:'Challenge',zen:'Zen',hard:'Hard',story:'Story' }[m] || m;
+async function saveSettings(patch) {
+  const d = Storage.get();
+  d.settings = { ...(d.settings || {}), ...patch };
+  await Storage.save();
 }
 
-// ── Story Screen ───────────────────────────────────────────────────────────────
+// ── STORY SCREEN ──────────────────────────────────────────────────────────────
 function buildStoryScreen() {
   const grid = $('story-grid');
   if (!grid) return;
+  const d   = Storage.get();
   grid.innerHTML = '';
-  const data = Storage.get();
 
   STORY_LEVELS.forEach(lv => {
-    const unlocked = lv.id === 1 || lv.id <= data.storyProgress + 1;
-    const stars    = data.storyStars[lv.id] || 0;
+    const unlocked = lv.id === 1 || lv.id <= (d.storyProgress || 0) + 1;
+    const stars    = d.storyStars?.[lv.id] || 0;
+    const isCur    = lv.id === (d.storyProgress || 0) + 1;
+
     const div = document.createElement('div');
-    div.className = `story-level ${unlocked ? '' : 'locked'} ${stars === 3 ? 'perfect' : ''}`;
+    div.className = `lv-card ${unlocked ? '' : 'lv-locked'} ${stars===3?'lv-3star':''} ${isCur?'lv-current':''}`;
     div.innerHTML = `
       <div class="lv-num">${lv.id}</div>
-      <div class="lv-title">${lv.title}</div>
+      <div class="lv-name">${lv.title}</div>
       <div class="lv-stars">${'★'.repeat(stars)}${'☆'.repeat(3-stars)}</div>
       ${!unlocked ? '<div class="lv-lock">🔒</div>' : ''}
     `;
-    if (unlocked) {
-      div.addEventListener('click', () => {
-        TG.haptic('light');
-        startGame('story', lv);
-      });
-    }
+    if (unlocked) div.addEventListener('click', () => { SoundEngine.button(); TG.haptic('light'); startGame('story', lv); });
     grid.appendChild(div);
   });
+
+  // Progress bar
+  const fill = $('story-fill');
+  const pct  = ((d.storyProgress || 0) / 20) * 100;
+  if (fill) fill.style.width = pct + '%';
+  setEl('story-count', `${d.storyProgress || 0}/20`);
 }
 
-// ── Themes Screen ─────────────────────────────────────────────────────────────
+// ── THEMES SCREEN ─────────────────────────────────────────────────────────────
 function buildThemesScreen() {
   const grid = $('themes-grid');
   if (!grid) return;
+  const d = Storage.get();
   grid.innerHTML = '';
-  const data = Storage.get();
 
   Object.entries(THEMES).forEach(([key, t]) => {
-    const owned = !t.locked || data.achievements['theme_' + key];
-    const div = document.createElement('div');
-    div.className = `theme-card ${key === currentTheme ? 'active' : ''} ${!owned ? 'locked' : ''}`;
-    div.style.cssText = `background:${t.bg};border-color:${key===currentTheme ? t.accent : t.border};`;
-    div.innerHTML = `
-      <div class="theme-preview">
-        ${t.blocks.slice(0,4).map(c=>`<div style="background:${c};width:18px;height:18px;border-radius:4px"></div>`).join('')}
+    const owned = !t.locked || d.achievements?.['theme_' + key];
+    const card  = document.createElement('div');
+    card.className = `theme-card ${key === currentTheme ? 'active' : ''}`;
+    card.style.cssText = `background:${t.bg};border-color:${key===currentTheme?t.accent:t.border||'rgba(255,255,255,0.07)'}`;
+
+    const swatches = t.blocks.slice(0,4).map(c =>
+      `<div class="tsw-cell" style="background:${c}"></div>`).join('');
+
+    card.innerHTML = `
+      <div class="theme-swatch">${swatches}</div>
+      <div class="theme-label">
+        <span class="theme-emoji">${t.emoji}</span>
+        <span class="theme-name" style="color:${t.text}">${t.name}</span>
       </div>
-      <div class="theme-emoji">${t.emoji}</div>
-      <div class="theme-name" style="color:${t.text}">${t.name}</div>
-      ${!owned ? `<div class="theme-price" style="color:${t.text}88">🪙 ${t.price}</div>` : ''}
-      ${key===currentTheme ? `<div class="theme-check">✓</div>` : ''}
+      ${!owned ? `<div class="theme-price">🪙 ${t.price}</div>` : ''}
+      ${key === currentTheme ? '<div class="theme-chk">✓</div>' : ''}
     `;
-    div.addEventListener('click', async () => {
+
+    card.addEventListener('click', async () => {
+      SoundEngine.button();
       if (!owned) {
-        const ok = await Storage.spendCoins(t.price||50);
-        if (!ok) { TG.haptic('error'); showToast('Not enough coins!'); return; }
-        data.achievements['theme_'+key] = Date.now();
+        const ok = await Storage.spendCoins(t.price || 50);
+        if (!ok) { TG.haptic('error'); showToast('Not enough coins 🪙'); return; }
+        d.achievements = d.achievements || {};
+        d.achievements['theme_' + key] = Date.now();
         await Storage.save();
         TG.haptic('success');
       }
@@ -487,161 +571,184 @@ function buildThemesScreen() {
       if (renderer) renderer.theme = key;
       TG.haptic('light');
       buildThemesScreen();
+      buildMenuUI();
     });
-    grid.appendChild(div);
+    grid.appendChild(card);
   });
 }
 
-// ── Stats Screen ──────────────────────────────────────────────────────────────
+// ── STATS SCREEN ──────────────────────────────────────────────────────────────
 function buildStatsScreen() {
-  const data = Storage.get();
-  const stats = data.stats || {};
-  const items = [
-    ['Best Score',    data.bestScore || 0],
-    ['Total Score',   data.totalScore || 0],
-    ['Games Played',  data.gamesPlayed || 0],
-    ['Lines Cleared', stats.linesCleared || 0],
-    ['Pieces Placed', stats.piecesPlaced || 0],
-    ['Max Combo',     stats.maxCombo || 0],
-    ['Perfect Clears',stats.perfectClears || 0],
-    ['Coins',         data.coins || 0],
+  const d = Storage.get(), st = d.stats || {};
+  const rows = [
+    ['🏆','Best Score',    (d.bestScore||0).toLocaleString()],
+    ['📊','Total Score',   (d.totalScore||0).toLocaleString()],
+    ['🎮','Games Played',  (d.gamesPlayed||0).toLocaleString()],
+    ['➖','Lines Cleared', (st.linesCleared||0).toLocaleString()],
+    ['🧩','Pieces Placed', (st.piecesPlaced||0).toLocaleString()],
+    ['⚡','Max Combo',     st.maxCombo||0],
+    ['✨','Perfect Clears',st.perfectClears||0],
+    ['🪙','Coins',         (d.coins||0).toLocaleString()],
+    ['📖','Story Levels',  `${d.storyProgress||0}/20`],
   ];
   const el = $('stats-content');
   if (!el) return;
-  el.innerHTML = items.map(([label, val]) =>
-    `<div class="stat-row"><span class="stat-label">${label}</span><span class="stat-val">${val.toLocaleString()}</span></div>`
-  ).join('');
+  el.innerHTML = `<div class="stats-group">${rows.map(([ico,name,val])=>`
+    <div class="stat-row">
+      <div class="stat-ico">${ico}</div>
+      <div class="stat-info"><div class="stat-name">${name}</div></div>
+      <div class="stat-val">${val}</div>
+    </div>`).join('')}</div>`;
 }
 
-// ── Achievements Screen ───────────────────────────────────────────────────────
+// ── ACHIEVEMENTS SCREEN ───────────────────────────────────────────────────────
 function buildAchievementsScreen() {
-  const data = Storage.get();
-  const el = $('achievements-content');
+  const d  = Storage.get();
+  const el = $('ach-content');
   if (!el) return;
-  el.innerHTML = Object.values(ACHIEVEMENTS).map(a => {
-    const done = !!data.achievements[a.id];
-    return `<div class="ach-row ${done?'done':''}">
-      <div class="ach-icon-big">${done?'🏆':'🔒'}</div>
-      <div class="ach-info"><div class="ach-title">${a.label}</div><div class="ach-sub">${a.desc}</div></div>
-      <div class="ach-reward">${done?'✓':'+'+a.coins+'🪙'}</div>
+  el.innerHTML = `<div class="ach-list">${Object.values(ACHIEVEMENTS).map(a => {
+    const done = !!d.achievements?.[a.id];
+    return `<div class="ach-card ${done?'done':''}">
+      <div class="ach-ico">${done?'🏆':'🔒'}</div>
+      <div class="ach-body">
+        <div class="ach-name">${a.label}</div>
+        <div class="ach-desc">${a.desc}</div>
+      </div>
+      ${done ? '<div class="ach-done">✓</div>' : `<div class="ach-badge">+${a.coins}🪙</div>`}
     </div>`;
-  }).join('');
+  }).join('')}</div>`;
 }
 
-// ── Toast ──────────────────────────────────────────────────────────────────────
+// ── ACHIEVEMENT TOAST ──────────────────────────────────────────────────────────
+function showAchToast(a) {
+  SoundEngine.achievement();
+  const el = document.createElement('div');
+  el.className = 'ach-toast';
+  el.innerHTML = `<div class="ach-t-ico">🏆</div><div class="ach-t-body"><div class="ach-t-name">${a.label}</div><div class="ach-t-desc">${a.desc}</div></div><div class="ach-t-coins">+${a.coins}🪙</div>`;
+  document.body.appendChild(el);
+  requestAnimationFrame(() => el.classList.add('show'));
+  setTimeout(() => { el.classList.remove('show'); setTimeout(() => el.remove(), 400); }, 2800);
+}
+
+// ── TOAST ──────────────────────────────────────────────────────────────────────
 function showToast(msg) {
-  const t = document.createElement('div');
-  t.className = 'toast';
-  t.textContent = msg;
-  document.body.appendChild(t);
-  requestAnimationFrame(()=>t.classList.add('show'));
-  setTimeout(()=>{t.classList.remove('show');setTimeout(()=>t.remove(),400);},2000);
+  const el = document.createElement('div');
+  el.className = 'toast';
+  el.textContent = msg;
+  document.body.appendChild(el);
+  requestAnimationFrame(() => el.classList.add('show'));
+  setTimeout(() => { el.classList.remove('show'); setTimeout(() => el.remove(), 350); }, 2000);
 }
 
-// ── Event Listeners ───────────────────────────────────────────────────────────
-function setupEventListeners() {
-  // Menu buttons
-  $('btn-classic')?.addEventListener('click', () => { TG.haptic('light'); startGame('classic'); });
-  $('btn-modes')?.addEventListener('click',   () => { TG.haptic('light'); showScreen('screen-modes'); });
-  $('btn-story')?.addEventListener('click',   () => { TG.haptic('light'); buildStoryScreen(); showScreen('screen-story'); });
-  $('btn-themes')?.addEventListener('click',  () => { TG.haptic('light'); buildThemesScreen(); showScreen('screen-themes'); });
-  $('btn-stats')?.addEventListener('click',   () => { TG.haptic('light'); buildStatsScreen(); showScreen('screen-stats'); });
-  $('btn-achievements')?.addEventListener('click', () => { TG.haptic('light'); buildAchievementsScreen(); showScreen('screen-achievements'); });
-
-  // Mode selection
-  document.querySelectorAll('[data-mode]').forEach(btn => {
-    btn.addEventListener('click', () => {
-      TG.haptic('light');
-      const mode = btn.dataset.mode;
-      startGame(mode);
-    });
-  });
-
-  // Game buttons
-  $('btn-pause')?.addEventListener('click', togglePause);
-  $('btn-undo')?.addEventListener('click',  doUndo);
-  $('btn-shuffle')?.addEventListener('click', doShuffle);
-
-  // Back buttons
-  document.querySelectorAll('[data-back]').forEach(btn => {
-    btn.addEventListener('click', () => { TG.haptic('light'); showScreen(btn.dataset.back); });
-  });
-
-  // Game over buttons
-  $('btn-play-again')?.addEventListener('click', () => {
-    TG.haptic('light');
-    startGame(currentMode, currentLevel);
-  });
-  $('btn-menu')?.addEventListener('click', () => {
-    TG.haptic('light');
-    buildMenuUI();
-    showScreen('screen-menu');
-  });
-  $('btn-share')?.addEventListener('click', () => {
-    TG.haptic('light');
-    TG.shareScore(engine?.score || 0, modeLabel(currentMode));
-  });
-
-  // Level win buttons
-  $('btn-next-level')?.addEventListener('click', () => {
-    const win = $('level-win'); if(win) win.classList.remove('show');
-    const nextId = (currentLevel?.id||0) + 1;
-    const next = STORY_LEVELS.find(l=>l.id===nextId);
-    if (next) startGame('story', next);
-    else { buildMenuUI(); showScreen('screen-menu'); }
-  });
-  $('btn-retry-level')?.addEventListener('click', () => {
-    const win=$('level-win'); if(win) win.classList.remove('show');
-    startGame('story', currentLevel);
-  });
-  $('btn-win-menu')?.addEventListener('click', () => {
-    const win=$('level-win'); if(win) win.classList.remove('show');
-    buildMenuUI(); showScreen('screen-menu');
-  });
-
-  // Resize
-  window.addEventListener('resize', () => { if (renderer) renderer.resize(); });
-
-  // Drag setup
-  setupDragListeners();
-  setupPointerListeners();
-
-  // Pause overlay
-  $('btn-resume')?.addEventListener('click', () => { isPaused=false; $('pause-overlay')?.classList.remove('show'); gameLoop(); });
+// ── HELPERS ───────────────────────────────────────────────────────────────────
+function modeLabel(m) {
+  return { classic:'Classic', timed:'Timed', challenge:'Challenge',
+           zen:'Zen', hard:'Hard', story:'Story' }[m] || m;
 }
 
 function togglePause() {
   if (!engine || engine.gameOver) return;
   isPaused = !isPaused;
   if (isPaused) {
-    cancelAnimationFrame(animFrameId);
+    cancelAnimationFrame(animId);
     $('pause-overlay')?.classList.add('show');
+    SoundEngine.stopMusic();
     TG.haptic('light');
   } else {
     $('pause-overlay')?.classList.remove('show');
-    gameLoop();
+    loop();
+    if (SoundEngine.musicEnabled) SoundEngine.startMusic();
   }
 }
 
-function doUndo() {
+async function doUndo() {
   if (!engine) return;
-  if (engine.usedUndo) { showToast('Undo already used!'); return; }
+  if (engine.usedUndo) { showToast('Undo already used'); return; }
   engine.undo();
-  renderPieceTray();
-  updateGameUI();
-  TG.haptic('light');
+  renderTray(); updateGameUI();
+  TG.haptic('light'); SoundEngine.button();
   $('btn-undo').disabled = true;
 }
 
 async function doShuffle() {
   if (!engine) return;
   const ok = await Storage.spendCoins(5);
-  if (!ok) { showToast('Need 5 🪙 to shuffle!'); TG.haptic('error'); return; }
+  if (!ok) { showToast('Need 5 🪙 to shuffle'); TG.haptic('error'); return; }
   engine.shuffle();
-  renderPieceTray();
-  TG.haptic('medium');
+  renderTray();
+  TG.haptic('medium'); SoundEngine.button();
   buildMenuUI();
 }
 
-// ── Boot ──────────────────────────────────────────────────────────────────────
+// ── EVENT LISTENERS ───────────────────────────────────────────────────────────
+function setupListeners() {
+  // Menu
+  $('btn-play')?.addEventListener('click', () => { SoundEngine.button(); TG.haptic('light'); startGame('classic'); });
+  $('btn-modes')?.addEventListener('click', () => { SoundEngine.button(); TG.haptic('light'); showScreen('screen-modes'); });
+  $('btn-story')?.addEventListener('click', () => { SoundEngine.button(); TG.haptic('light'); buildStoryScreen(); showScreen('screen-story'); });
+  $('btn-themes')?.addEventListener('click', () => { SoundEngine.button(); TG.haptic('light'); buildThemesScreen(); showScreen('screen-themes'); });
+  $('btn-stats')?.addEventListener('click', () => { SoundEngine.button(); TG.haptic('light'); buildStatsScreen(); showScreen('screen-stats'); });
+  $('btn-achievements')?.addEventListener('click', () => { SoundEngine.button(); TG.haptic('light'); buildAchievementsScreen(); showScreen('screen-achievements'); });
+  $('btn-settings')?.addEventListener('click', () => { SoundEngine.button(); TG.haptic('light'); buildSettingsScreen(); showScreen('screen-settings'); });
+
+  // Mode cards
+  document.querySelectorAll('[data-mode]').forEach(btn => {
+    btn.addEventListener('click', () => { SoundEngine.button(); TG.haptic('light'); startGame(btn.dataset.mode); });
+  });
+
+  // Random story buttons
+  $('btn-rand-easy')?.addEventListener('click', () => { SoundEngine.button(); startGame('story', generateRandomLevel(Math.floor(Math.random()*8)+1)); });
+  $('btn-rand-hard')?.addEventListener('click', () => { SoundEngine.button(); startGame('story', generateRandomLevel(Math.floor(Math.random()*8)+11)); });
+
+  // Back buttons
+  document.querySelectorAll('[data-back]').forEach(btn => {
+    btn.addEventListener('click', () => { SoundEngine.button(); TG.haptic('light'); showScreen(btn.dataset.back); });
+  });
+
+  // Game controls
+  $('btn-pause')?.addEventListener('click', togglePause);
+  $('btn-undo')?.addEventListener('click',  doUndo);
+  $('btn-shuffle')?.addEventListener('click', doShuffle);
+
+  // Resume
+  $('btn-resume')?.addEventListener('click', () => { togglePause(); });
+  $('btn-pause-menu')?.addEventListener('click', () => {
+    isPaused = false;
+    $('pause-overlay')?.classList.remove('show');
+    SoundEngine.stopMusic();
+    buildMenuUI(); showScreen('screen-menu');
+  });
+
+  // Game over
+  $('btn-play-again')?.addEventListener('click', () => { SoundEngine.button(); startGame(currentMode, currentLevel); });
+  $('btn-go-menu')?.addEventListener('click', () => { SoundEngine.button(); buildMenuUI(); showScreen('screen-menu'); });
+  $('btn-share')?.addEventListener('click', () => { SoundEngine.button(); TG.shareScore(engine?.score || 0, modeLabel(currentMode)); });
+
+  // Level win
+  $('btn-next-level')?.addEventListener('click', () => {
+    SoundEngine.button();
+    $('level-win')?.classList.remove('show');
+    const next = STORY_LEVELS.find(l => l.id === (currentLevel?.id || 0) + 1);
+    if (next) startGame('story', next);
+    else { buildMenuUI(); showScreen('screen-menu'); }
+  });
+  $('btn-retry')?.addEventListener('click', () => {
+    SoundEngine.button();
+    $('level-win')?.classList.remove('show');
+    startGame('story', currentLevel);
+  });
+  $('btn-win-menu')?.addEventListener('click', () => {
+    SoundEngine.button();
+    $('level-win')?.classList.remove('show');
+    buildMenuUI(); showScreen('screen-menu');
+  });
+
+  // Resize
+  window.addEventListener('resize', () => renderer?.resize());
+
+  // Drag
+  setupDrag();
+}
+
+// ── BOOT ──────────────────────────────────────────────────────────────────────
 window.addEventListener('DOMContentLoaded', init);
