@@ -1,0 +1,308 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover, maximum-scale=1.0, user-scalable=no" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+  <meta name="theme-color" content="#0a0a0f" />
+  <title>Block Blast</title>
+  <link rel="stylesheet" href="css/style.css" />
+  <!-- Telegram Mini App SDK -->
+  <script src="https://telegram.org/js/telegram-web-app.js"></script>
+</head>
+<body>
+<div id="app">
+
+  <!-- ═══════════════════ MENU SCREEN ═══════════════════ -->
+  <div id="screen-menu" class="screen active">
+    <div class="menu-card">
+      <div class="menu-header">
+        <span class="menu-logo">🧩</span>
+        <h1 class="menu-title">Block Blast</h1>
+        <p class="menu-subtitle">Place • Clear • Score</p>
+      </div>
+
+      <div class="menu-user-row">
+        <div class="user-avatar" id="menu-avatar">P</div>
+        <span id="menu-username">Player</span>
+        <span style="color:var(--text-sub);font-size:12px">·</span>
+        <span style="font-size:13px;font-weight:600">🪙 <span id="menu-coins">0</span></span>
+      </div>
+
+      <div class="menu-stats-row">
+        <div class="menu-stat">
+          <div class="menu-stat-val" id="menu-best">0</div>
+          <div class="menu-stat-label">Best</div>
+        </div>
+        <div class="menu-stat">
+          <div class="menu-stat-val" id="menu-story">0/20</div>
+          <div class="menu-stat-label">Story</div>
+        </div>
+      </div>
+
+      <button class="btn btn-primary" id="btn-classic">
+        ▶ Play Classic
+      </button>
+
+      <div class="menu-grid" style="margin-top:10px">
+        <button class="btn btn-secondary" id="btn-modes">🎮 Modes</button>
+        <button class="btn btn-secondary" id="btn-story">📖 Story</button>
+        <button class="btn btn-secondary" id="btn-themes">🎨 Themes</button>
+        <button class="btn btn-secondary" id="btn-stats">📊 Stats</button>
+        <button class="btn btn-secondary" id="btn-achievements" style="grid-column:span 2">🏆 Achievements</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ═══════════════════ MODES SCREEN ═══════════════════ -->
+  <div id="screen-modes" class="screen hidden">
+    <div class="nav-header">
+      <div class="nav-back" data-back="screen-menu">‹</div>
+      <h2 class="nav-title">Game Modes</h2>
+    </div>
+    <div class="scroll-content">
+      <div class="modes-grid">
+        <div class="mode-card" data-mode="classic">
+          <span class="mode-icon">♾️</span>
+          <div class="mode-name">Classic</div>
+          <div class="mode-desc">Endless play. Beat your best score.</div>
+        </div>
+        <div class="mode-card" data-mode="timed">
+          <span class="mode-icon">⏱️</span>
+          <div class="mode-name">Timed</div>
+          <div class="mode-desc">3 minutes. Max score wins.</div>
+        </div>
+        <div class="mode-card" data-mode="zen">
+          <span class="mode-icon">🧘</span>
+          <div class="mode-name">Zen</div>
+          <div class="mode-desc">No game over. Just chill.</div>
+        </div>
+        <div class="mode-card" data-mode="hard">
+          <span class="mode-icon">💀</span>
+          <div class="mode-name">Hard</div>
+          <div class="mode-desc">10×10 grid, tough pieces.</div>
+        </div>
+        <div class="mode-card" data-mode="challenge" style="grid-column:span 2">
+          <span class="mode-icon">⚡</span>
+          <div class="mode-name">Challenge</div>
+          <div class="mode-desc">Daily objectives. Complete all 3 to earn coins.</div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ═══════════════════ STORY SCREEN ═══════════════════ -->
+  <div id="screen-story" class="screen hidden">
+    <div class="nav-header">
+      <div class="nav-back" data-back="screen-menu">‹</div>
+      <h2 class="nav-title">Story Mode</h2>
+    </div>
+    <div class="scroll-content">
+      <p style="font-size:13px;color:var(--text-sub);margin-bottom:4px">
+        20 levels of increasing challenge. Each tells a story.
+      </p>
+      <div class="story-grid" id="story-grid"></div>
+
+      <!-- Random Level Generator -->
+      <div style="margin-top:24px;padding-top:20px;border-top:1px solid var(--border)">
+        <div style="font-size:15px;font-weight:700;margin-bottom:4px">🎲 Random Levels</div>
+        <div style="font-size:12px;color:var(--text-sub);margin-bottom:12px">Endless procedurally generated puzzles</div>
+        <div style="display:flex;gap:10px">
+          <button class="btn btn-secondary" style="flex:1;font-size:13px" onclick="startGame('story', generateRandomLevel(Math.floor(Math.random()*15)+1))">Easy Random</button>
+          <button class="btn btn-secondary" style="flex:1;font-size:13px" onclick="startGame('story', generateRandomLevel(Math.floor(Math.random()*10)+11))">Hard Random</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ═══════════════════ GAME SCREEN ═══════════════════ -->
+  <div id="screen-game" class="screen hidden">
+
+    <!-- Header: score + controls -->
+    <div class="game-header">
+      <div style="display:flex;align-items:center;gap:8px">
+        <div class="btn-icon btn" id="btn-pause" style="font-size:16px">⏸</div>
+        <div class="game-score-group">
+          <span class="score-label">Score</span>
+          <span class="score-value" id="score-value">0</span>
+        </div>
+      </div>
+
+      <div style="display:flex;align-items:center;gap:6px">
+        <div id="timer-display" style="display:none">3:00</div>
+        <div class="game-score-group" style="align-items:flex-end">
+          <span class="score-label">Best</span>
+          <span class="score-value" id="best-value" style="font-size:18px;color:var(--text-sub)">0</span>
+        </div>
+      </div>
+    </div>
+
+    <!-- Objective Bar -->
+    <div id="objective-bar">
+      <div class="obj-row">
+        <span id="obj-label">Objective</span>
+        <div class="obj-track"><div id="obj-fill"></div></div>
+      </div>
+    </div>
+
+    <!-- Canvas -->
+    <div class="game-canvas-wrap">
+      <canvas id="game-canvas"></canvas>
+    </div>
+
+    <!-- Piece Tray -->
+    <div class="piece-tray" id="piece-tray">
+      <div class="piece-wrap" id="piece-wrap-0">
+        <canvas id="piece-canvas-0" width="110" height="110"></canvas>
+      </div>
+      <div class="piece-wrap" id="piece-wrap-1">
+        <canvas id="piece-canvas-1" width="110" height="110"></canvas>
+      </div>
+      <div class="piece-wrap" id="piece-wrap-2">
+        <canvas id="piece-canvas-2" width="110" height="110"></canvas>
+      </div>
+    </div>
+
+    <!-- Action row -->
+    <div style="display:flex;gap:10px;padding:0 16px 12px;width:100%;max-width:420px">
+      <button class="btn btn-secondary" id="btn-undo" style="flex:1;font-size:14px;padding:11px">↩ Undo</button>
+      <button class="btn btn-ghost" id="btn-shuffle" style="flex:1;font-size:14px;padding:11px">🔀 Shuffle <span style="font-size:11px;opacity:0.6">(5🪙)</span></button>
+    </div>
+
+  </div>
+
+  <!-- ═══════════════════ GAME OVER SCREEN ═══════════════════ -->
+  <div id="screen-gameover" class="screen hidden">
+    <div class="go-card">
+      <span class="go-emoji">💥</span>
+      <div class="go-title">Game Over</div>
+      <div class="go-mode" id="go-mode">Classic</div>
+
+      <div class="go-score-display">
+        <span class="go-score-num" id="go-score">0</span>
+        <div class="go-score-label">Score</div>
+      </div>
+
+      <div class="go-new-best" id="go-new-best">🎉 New Best!</div>
+
+      <div class="go-stats-row">
+        <div class="go-stat">
+          <div class="go-stat-val" id="go-best">0</div>
+          <div class="go-stat-label">Best</div>
+        </div>
+        <div class="go-stat">
+          <div class="go-stat-val" id="go-lines">0</div>
+          <div class="go-stat-label">Lines</div>
+        </div>
+        <div class="go-stat">
+          <div class="go-stat-val" id="go-combos">0</div>
+          <div class="go-stat-label">Max Combo</div>
+        </div>
+      </div>
+
+      <div class="go-buttons">
+        <button class="btn btn-primary" id="btn-play-again">▶ Play Again</button>
+        <div style="display:flex;gap:10px">
+          <button class="btn btn-secondary" id="btn-share" style="flex:1">📤 Share</button>
+          <button class="btn btn-secondary" id="btn-menu" style="flex:1">🏠 Menu</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ═══════════════════ THEMES SCREEN ═══════════════════ -->
+  <div id="screen-themes" class="screen hidden">
+    <div class="nav-header">
+      <div class="nav-back" data-back="screen-menu">‹</div>
+      <h2 class="nav-title">Themes</h2>
+    </div>
+    <div class="scroll-content">
+      <p style="font-size:13px;color:var(--text-sub);margin-bottom:4px">Locked themes cost coins</p>
+      <div class="themes-grid" id="themes-grid"></div>
+    </div>
+  </div>
+
+  <!-- ═══════════════════ STATS SCREEN ═══════════════════ -->
+  <div id="screen-stats" class="screen hidden">
+    <div class="nav-header">
+      <div class="nav-back" data-back="screen-menu">‹</div>
+      <h2 class="nav-title">Statistics</h2>
+    </div>
+    <div class="scroll-content" id="stats-content"></div>
+  </div>
+
+  <!-- ═══════════════════ ACHIEVEMENTS SCREEN ═══════════════════ -->
+  <div id="screen-achievements" class="screen hidden">
+    <div class="nav-header">
+      <div class="nav-back" data-back="screen-menu">‹</div>
+      <h2 class="nav-title">Achievements</h2>
+    </div>
+    <div class="scroll-content" id="achievements-content"></div>
+  </div>
+
+</div><!-- #app -->
+
+<!-- ═══════════════════ OVERLAYS ═══════════════════ -->
+
+<!-- Combo Flash -->
+<div id="combo-display"></div>
+
+<!-- Pause Overlay -->
+<div id="pause-overlay">
+  <div class="pause-title">⏸ Paused</div>
+  <div class="pause-buttons">
+    <button class="btn btn-primary" id="btn-resume">▶ Resume</button>
+    <button class="btn btn-secondary" id="btn-pause-menu" onclick="showScreen('screen-menu');isPaused=false;document.getElementById('pause-overlay').classList.remove('show');">🏠 Menu</button>
+  </div>
+</div>
+
+<!-- Level Banner -->
+<div id="level-banner">
+  <div id="banner-title"></div>
+  <div id="banner-story"></div>
+  <div id="banner-obj"></div>
+</div>
+
+<!-- Level Win -->
+<div id="level-win">
+  <div class="win-card">
+    <span class="win-emoji">🎉</span>
+    <div class="win-title">Level Complete</div>
+    <div class="win-level" id="win-title"></div>
+    <div class="win-stars">
+      <span class="star">★</span>
+      <span class="star">★</span>
+      <span class="star">★</span>
+    </div>
+    <div class="win-score-row">
+      <div class="win-stat">
+        <div class="win-stat-val" id="win-score">0</div>
+        <div class="win-stat-label">Score</div>
+      </div>
+      <div class="win-stat">
+        <div class="win-stat-val" id="win-reward">+0🪙</div>
+        <div class="win-stat-label">Reward</div>
+      </div>
+    </div>
+    <div class="win-buttons">
+      <button class="btn btn-primary" id="btn-next-level">Next Level ›</button>
+      <div style="display:flex;gap:10px">
+        <button class="btn btn-secondary" id="btn-retry-level" style="flex:1">↩ Retry</button>
+        <button class="btn btn-ghost" id="btn-win-menu" style="flex:1">🏠 Menu</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- Scripts -->
+<script src="js/figures.js"></script>
+<script src="js/levels.js"></script>
+<script src="js/themes.js"></script>
+<script src="js/telegram.js"></script>
+<script src="js/storage.js"></script>
+<script src="js/gameEngine.js"></script>
+<script src="js/renderer.js"></script>
+<script src="js/main.js"></script>
+</body>
+</html>
