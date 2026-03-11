@@ -124,6 +124,11 @@ class GameEngine {
       if (this.grid.every(row => row[c] !== 0)) cleared.cols.push(c);
     }
 
+    // Capture snapshot BEFORE clearing so renderer uses real block colors for particles
+    if (cleared.rows.length + cleared.cols.length > 0) {
+      cleared.snapshot = this.grid.map(r => [...r]);
+    }
+
     // Clear rows
     cleared.rows.forEach(r => {
       this.grid[r] = Array(this.gridSize).fill(0);
