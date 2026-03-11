@@ -80,9 +80,34 @@ class Renderer {
   // ── BACKGROUND ────────────────────────────────────────────────────────────
   _drawBg(t) {
     const { ctx, boardW, boardH } = this;
-    ctx.fillStyle = t.gridBg;
+
+    // Forest theme: subtle wood-grain gradient on the grid bg
+    if (t.forestBg) {
+      const grad = ctx.createLinearGradient(0, 0, boardW, boardH);
+      grad.addColorStop(0,   '#0f1d10');
+      grad.addColorStop(0.4, '#111c12');
+      grad.addColorStop(1,   '#0d1a0e');
+      ctx.fillStyle = grad;
+    } else {
+      ctx.fillStyle = t.gridBg;
+    }
     this._rr(ctx, 0, 0, boardW, boardH, 18);
     ctx.fill();
+
+    // Star field (space theme)
+    if (t.starField) {
+      const now = Date.now();
+      ctx.save();
+      for (let i = 0; i < 40; i++) {
+        const x = (Math.sin(i * 137.5) * 0.5 + 0.5) * boardW;
+        const y = (Math.cos(i * 97.3)  * 0.5 + 0.5) * boardH;
+        const a = 0.3 + 0.3 * Math.sin(now * 0.002 + i);
+        ctx.globalAlpha = a;
+        ctx.fillStyle   = '#ffffff';
+        ctx.beginPath(); ctx.arc(x, y, 0.8 + Math.sin(i) * 0.5, 0, Math.PI*2); ctx.fill();
+      }
+      ctx.restore();
+    }
   }
 
   _drawGrid(t) {
@@ -110,62 +135,113 @@ class Renderer {
     ctx.restore();
   }
 
-  // ── SNAP PREVIEW (drawn on canvas at grid position) ───────────────────────
+  // ── SNAP PREVIEW — very visible on canvas for large pieces ──────────────────
   _drawSnapPreview(engine, dragState, t) {
     if (!dragState?.active || dragState.snapCol === null || dragState.snapRow === null) return;
-    const { ctx, cellSize } = this;
+    const { ctx, cellSize: cs } = this;
     const { piece, snapCol: col, snapRow: row, valid } = dragState;
     const color = t.blocks[piece.color % t.blocks.length];
     const now   = Date.now();
 
-    // Pulse animation for valid positions
-    const pulse = valid ? (0.85 + 0.07 * Math.sin(now * 0.008)) : 1;
+    const pulse = valid ? (0.82 + 0.1 * Math.sin(now * 0.007)) : 1;
+    const pad = 3, radius = Math.max(5, cs * 0.22);
 
-    for (const [dx, dy] of piece.cells) {
-      const c = col + dx, r = row + dy;
-      const x = c * cellSize, y = r * cellSize;
-      const pad = 3, w = cellSize - pad * 2, h = cellSize - pad * 2;
-      const radius = Math.max(4, cellSize * 0.2);
+    // ── 1. Bounding-box glow behind the whole piece (makes it pop out) ─────
+    if (valid) {
+      const cells = piece.cells;
+      const minC  = Math.min(...cells.map(([dx]) => col + dx));
+      const maxC  = Math.max(...cells.map(([dx]) => col + dx));
+      const minR  = Math.min(...cells.map(([,dy]) => row + dy));
+      const maxR  = Math.max(...cells.map(([,dy]) => row + dy));
+      const bx = minC * cs, by = minR * cs;
+      const bw = (maxC - minC + 1) * cs, bh = (maxR - minR + 1) * cs;
 
       ctx.save();
-      ctx.globalAlpha = valid ? pulse * 0.88 : 0.38;
+      ctx.shadowColor = color;
+      ctx.shadowBlur  = cs * 0.9;
+      ctx.globalAlpha = pulse * 0.22;
+      ctx.fillStyle   = color;
+      this._rr(ctx, bx + pad, by + pad, bw - pad*2, bh - pad*2, radius + 4);
+      ctx.fill();
+      ctx.restore();
+    }
+
+    // ── 2. Per-cell blocks ──────────────────────────────────────────────────
+    for (const [dx, dy] of piece.cells) {
+      const c = col + dx, r = row + dy;
+      const x = c * cs, y = r * cs;
+      const w = cs - pad * 2, h = cs - pad * 2;
+
+      ctx.save();
 
       if (!valid) {
-        // Red invalid tint
-        ctx.fillStyle = '#f87171';
+        // ── INVALID: translucent red + X ────────────────────────────────
+        ctx.globalAlpha = 0.55;
+        ctx.fillStyle   = '#ff4d4d';
         this._rr(ctx, x + pad, y + pad, w, h, radius);
         ctx.fill();
-        // X mark
-        ctx.globalAlpha = 0.5;
-        ctx.strokeStyle = '#fff';
-        ctx.lineWidth = 1.5;
-        const cx = x + cellSize / 2, cy = y + cellSize / 2, s = cellSize * 0.15;
-        ctx.beginPath(); ctx.moveTo(cx - s, cy - s); ctx.lineTo(cx + s, cy + s); ctx.stroke();
-        ctx.beginPath(); ctx.moveTo(cx + s, cy - s); ctx.lineTo(cx - s, cy + s); ctx.stroke();
+
+        ctx.globalAlpha = 0.7;
+        ctx.strokeStyle = 'rgba(255,255,255,0.9)';
+        ctx.lineWidth   = 2;
+        const cx = x + cs/2, cy = y + cs/2, s = cs * 0.17;
+        ctx.beginPath(); ctx.moveTo(cx-s,cy-s); ctx.lineTo(cx+s,cy+s); ctx.stroke();
+        ctx.beginPath(); ctx.moveTo(cx+s,cy-s); ctx.lineTo(cx-s,cy+s); ctx.stroke();
       } else {
-        // Valid: block color with glow
-        ctx.shadowColor = color + '88';
-        ctx.shadowBlur  = cellSize * 0.3;
+        // ── VALID: full-opacity block with strong glow ───────────────────
+        // Glow
+        ctx.shadowColor = color + 'cc';
+        ctx.shadowBlur  = cs * 0.5;
+        ctx.globalAlpha = pulse;
         ctx.fillStyle   = color;
         this._rr(ctx, x + pad, y + pad, w, h, radius);
         ctx.fill();
-        ctx.shadowBlur = 0;
+        ctx.shadowBlur  = 0;
+        ctx.shadowColor = 'transparent';
 
-        // Top shine
-        const shine = ctx.createLinearGradient(x + pad, y + pad, x + pad, y + pad + h * 0.5);
-        shine.addColorStop(0, 'rgba(255,255,255,0.4)');
-        shine.addColorStop(1, 'rgba(255,255,255,0)');
-        ctx.fillStyle = shine;
-        this._rr(ctx, x + pad + 2, y + pad + 2, w - 4, h * 0.42, radius - 1);
+        // Bottom depth edge
+        ctx.fillStyle = this._darken(color, 0.28);
+        this._rr(ctx, x+pad+1, y+pad + h*0.76, w-2, h*0.24, radius);
         ctx.fill();
 
-        // Green valid border
-        ctx.strokeStyle = 'rgba(52,211,153,0.6)';
-        ctx.lineWidth   = 1.5;
-        this._rr(ctx, x + pad, y + pad, w, h, radius);
+        // Top shine
+        const shine = ctx.createLinearGradient(x+pad, y+pad, x+pad, y+pad+h*0.5);
+        shine.addColorStop(0, 'rgba(255,255,255,0.52)');
+        shine.addColorStop(1, 'rgba(255,255,255,0)');
+        ctx.fillStyle = shine;
+        this._rr(ctx, x+pad+2, y+pad+2, w-4, h*0.44, radius-1);
+        ctx.fill();
+
+        // Bright animated border
+        ctx.globalAlpha  = pulse * 0.9;
+        ctx.strokeStyle  = 'rgba(255,255,255,0.75)';
+        ctx.lineWidth    = 2;
+        this._rr(ctx, x+pad, y+pad, w, h, radius);
         ctx.stroke();
       }
 
+      ctx.restore();
+    }
+
+    // ── 3. Animated outer border around the whole piece footprint ───────────
+    if (valid) {
+      const cells = piece.cells;
+      const minC  = Math.min(...cells.map(([dx]) => col + dx));
+      const maxC  = Math.max(...cells.map(([dx]) => col + dx));
+      const minR  = Math.min(...cells.map(([,dy]) => row + dy));
+      const maxR  = Math.max(...cells.map(([,dy]) => row + dy));
+      const bx = minC * cs, by = minR * cs;
+      const bw = (maxC - minC + 1) * cs, bh = (maxR - minR + 1) * cs;
+
+      ctx.save();
+      ctx.globalAlpha = pulse * 0.6;
+      ctx.strokeStyle = 'rgba(255,255,255,0.85)';
+      ctx.lineWidth   = 2.5;
+      ctx.setLineDash([6, 4]);
+      ctx.lineDashOffset = -(now * 0.04 % 10);
+      this._rr(ctx, bx + 1, by + 1, bw - 2, bh - 2, radius + 2);
+      ctx.stroke();
+      ctx.setLineDash([]);
       ctx.restore();
     }
   }
@@ -443,34 +519,36 @@ class Renderer {
   }
 
   // ── DRAG FLOATING ELEMENT ─────────────────────────────────────────────────
-  // A separate canvas that floats above everything, following the pointer
+  // Floats above finger — anchored so the piece center is above the touch point
   showDragFloat(piece, px, py, themeName) {
     this.hideDragFloat();
-    const t  = THEMES[themeName] || THEMES.dark;
     const pw = getPieceWidth(piece);
     const ph = getPieceHeight(piece);
-    const cs = this.cellSize;
+    // Use larger cell size for the float preview so it's always easy to see
+    const cs = Math.max(this.cellSize, 40);
 
-    const el    = document.createElement('canvas');
-    el.width    = (pw + 1) * cs;
-    el.height   = (ph + 1) * cs;
+    const el  = document.createElement('canvas');
+    el.width  = pw * cs + 8;
+    el.height = ph * cs + 8;
+    // transform: center X on finger, place bottom of piece ~20px above finger
     el.style.cssText = `
-      position:fixed;pointer-events:none;z-index:9999;
+      position:fixed;
+      pointer-events:none;
+      z-index:9999;
       border-radius:${cs * 0.2}px;
-      opacity:0.96;
-      transform:scale(1.18) translate(-50%,-130%);
+      opacity:0.97;
+      transform-origin:50% 100%;
+      transform:translate(-50%,-100%) translateY(-24px) scale(1.12);
       transition:none;
-      will-change:transform,left,top;
+      will-change:left,top;
+      filter:drop-shadow(0 8px 24px rgba(0,0,0,0.55));
     `;
     this.drawPiecePreview(el, piece, themeName);
-
-    const ox = Math.floor(el.width / 2);
-    const oy = Math.floor(el.height / 2);
     el.style.left = px + 'px';
     el.style.top  = py + 'px';
-
     document.body.appendChild(el);
     this._dragEl = el;
+    this._dragPiece = piece;
   }
 
   moveDragFloat(px, py) {
