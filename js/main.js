@@ -13,21 +13,24 @@ let isPaused     = false;
 
 // ── Drag State ────────────────────────────────────────────────────────────────
 const drag = {
-  active:     false,
-  idx:        null,
-  piece:      null,
-  snapCol:    null,   // current snapped grid column (top-left of piece)
-  snapRow:    null,   // current snapped grid row
-  valid:      false,  // is current snap position valid?
-  pointerX:   0,
-  pointerY:   0,
+  active:   false,
+  idx:      null,
+  piece:    null,
+  snapCol:  null,
+  snapRow:  null,
+  valid:    false,
+  px:       0,
+  py:       0,
+  lastSnap: null,       // for haptic on snap change
 };
 
-// ── DOM shortcuts ─────────────────────────────────────────────────────────────
+// ── DOM ───────────────────────────────────────────────────────────────────────
 const $ = id => document.getElementById(id);
-const SCREENS = ['screen-menu','screen-modes','screen-story','screen-game',
-                 'screen-gameover','screen-themes','screen-stats',
-                 'screen-achievements','screen-settings'];
+const SCREENS = [
+  'screen-menu','screen-modes','screen-story','screen-game',
+  'screen-gameover','screen-themes','screen-stats',
+  'screen-achievements','screen-settings',
+];
 
 function showScreen(id) {
   SCREENS.forEach(s => {
@@ -39,30 +42,36 @@ function showScreen(id) {
   TG.hideMainButton();
 }
 
+// ── Haptic helper (respects settings) ─────────────────────────────────────────
+function haptic(type) {
+  const d = Storage.get();
+  if (d.settings?.haptic === false) return;
+  TG.haptic(type);
+}
+
 // ── INIT ──────────────────────────────────────────────────────────────────────
 async function init() {
   TG.init();
   await Storage.load();
   SoundEngine.init();
 
-  currentTheme = Storage.get().selectedTheme || 'dark';
+  const d = Storage.get();
+  currentTheme = d.selectedTheme || 'dark';
   applyTheme(currentTheme);
 
-  // Apply saved sound settings
-  const d = Storage.get();
   SoundEngine.musicEnabled = d.settings?.music !== false;
   SoundEngine.sfxEnabled   = d.settings?.sfx   !== false;
+  if (d.settings?.musicVol !== undefined) SoundEngine.setMusicVolume(d.settings.musicVol / 100);
+  if (d.settings?.sfxVol   !== undefined) SoundEngine.setSfxVolume(d.settings.sfxVol / 100);
 
   buildMenuUI();
   showScreen('screen-menu');
   setupListeners();
 
-  // Unlock music on first touch
+  // Start music on first interaction
   document.addEventListener('pointerdown', () => {
     SoundEngine.resume();
-    if (SoundEngine.musicEnabled && !SoundEngine.musicPlaying) {
-      SoundEngine.startMusic();
-    }
+    if (SoundEngine.musicEnabled && !SoundEngine.musicPlaying) SoundEngine.startMusic();
   }, { once: true });
 }
 
@@ -70,11 +79,12 @@ async function init() {
 function buildMenuUI() {
   const d    = Storage.get();
   const name = TG.getFirstName();
-  setEl('menu-username', name);
+  setEl('menu-username',   name);
   setEl('menu-avatar-char', name.charAt(0).toUpperCase());
-  setEl('menu-coins',   d.coins || 0);
-  setEl('menu-best',    (d.bestScore || 0).toLocaleString());
+  setEl('menu-coins',      d.coins || 0);
+  setEl('menu-best',       (d.bestScore || 0).toLocaleString());
   setEl('menu-story-stat', `${d.storyProgress || 0}/20`);
+  setEl('menu-games',      d.gamesPlayed || 0);
 }
 
 function setEl(id, val) {
@@ -82,7 +92,7 @@ function setEl(id, val) {
   if (el) el.textContent = val;
 }
 
-// ── START GAME ─────────────────────────────────────────────────────────────────
+// ── START GAME ────────────────────────────────────────────────────────────────
 function startGame(mode, level = null) {
   currentMode  = mode;
   currentLevel = level;
@@ -112,38 +122,38 @@ function startGame(mode, level = null) {
   renderer.gridSize   = gridSize;
   renderer.theme      = currentTheme;
   renderer.particles  = [];
-  renderer.clearAnim  = [];
+  renderer.rings      = [];
+  renderer.flashes    = [];
+  renderer.shockwaves = [];
   renderer.floatTexts = [];
   renderer.blockScale = Array.from({length:gridSize}, ()=>Array(gridSize).fill(1));
   renderer.blockAlpha = Array.from({length:gridSize}, ()=>Array(gridSize).fill(1));
+  renderer.hideDragFloat();
 
   updateGameUI();
   renderTray();
   showScreen('screen-game');
 
-  // Undo button reset
   const undoBtn = $('btn-undo');
   if (undoBtn) undoBtn.disabled = false;
 
   // Timer
   clearInterval(timerInt);
   const hasTimed = mode === 'timed' || level?.objective?.type?.includes('timed');
+  const timerEl  = $('timer-display');
   if (hasTimed) {
     timeLeft = level?.objective?.time || 180;
     updateTimer();
-    $('timer-display').style.display = 'block';
+    if (timerEl) timerEl.style.display = 'block';
     timerInt = setInterval(() => {
       if (!isPaused && !engine.gameOver && !engine.won) {
         timeLeft--;
         updateTimer();
-        if (timeLeft <= 0) {
-          clearInterval(timerInt);
-          handleGameOver(engine.score);
-        }
+        if (timeLeft <= 0) { clearInterval(timerInt); handleGameOver(engine.score); }
       }
     }, 1000);
   } else {
-    $('timer-display').style.display = 'none';
+    if (timerEl) timerEl.style.display = 'none';
   }
 
   if (level) showLevelBanner(level);
@@ -151,7 +161,7 @@ function startGame(mode, level = null) {
   if (animId) cancelAnimationFrame(animId);
   loop();
 
-  if (SoundEngine.musicEnabled) SoundEngine.startMusic();
+  if (SoundEngine.musicEnabled && !SoundEngine.musicPlaying) SoundEngine.startMusic();
 }
 
 function loop() {
@@ -160,7 +170,7 @@ function loop() {
   animId = requestAnimationFrame(loop);
 }
 
-// ── SCORE / EVENTS ─────────────────────────────────────────────────────────────
+// ── SCORE / EVENTS ────────────────────────────────────────────────────────────
 function handleScore(total, gained, cleared) {
   const el = $('score-val');
   if (el) {
@@ -169,14 +179,16 @@ function handleScore(total, gained, cleared) {
     void el.offsetWidth;
     el.classList.add('pop');
   }
+
   if (gained > 0 && renderer) {
     const canvas = $('game-canvas');
     if (canvas) {
-      renderer.addFloatText('+' + gained + (engine.combo > 1 ? ` ×${engine.combo}` : ''),
-        canvas.width / 2, canvas.height * 0.38,
-        THEMES[currentTheme]?.accent || '#5b7cfa', 20);
+      const label = gained > 0 ? '+' + gained + (engine.combo > 1 ? ` ×${engine.combo}` : '') : '';
+      renderer.addFloatText(label, canvas.width / 2, canvas.height * 0.35,
+        THEMES[currentTheme]?.accent || '#5b7cfa', 22);
     }
   }
+
   if (engine.combo > 1) {
     const cf = $('combo-flash');
     if (cf) {
@@ -185,25 +197,31 @@ function handleScore(total, gained, cleared) {
       void cf.offsetWidth;
       cf.classList.add('show');
       clearTimeout(cf._t);
-      cf._t = setTimeout(() => cf.classList.remove('show'), 1200);
+      cf._t = setTimeout(() => cf.classList.remove('show'), 1300);
     }
     SoundEngine.combo(engine.combo);
+    haptic('medium');
   }
+
   renderTray();
   updateObjProgress();
   checkAchievements(engine, Storage).then(arr => arr.forEach(showAchToast));
 }
 
-function handleLineClear({ rows, cols }) {
-  renderer.triggerLineClear(rows, cols, currentTheme);
-  TG.haptic(rows.length + cols.length >= 3 ? 'heavy' : 'medium');
-  SoundEngine.lineClear(rows.length + cols.length);
+function handleLineClear({ rows, cols, snapshot }) {
+  // snapshot is captured in gameEngine._clearLines BEFORE grid is zeroed
+  renderer.triggerLineClear(rows, cols, snapshot);
+
+  const total = rows.length + cols.length;
+  haptic(total >= 3 ? 'heavy' : 'medium');
+  SoundEngine.lineClear(total);
 }
 
 function handleGameOver(score) {
   clearInterval(timerInt);
   cancelAnimationFrame(animId);
-  TG.haptic('error');
+  renderer.hideDragFloat();
+  haptic('error');
   SoundEngine.gameOver();
   SoundEngine.stopMusic();
 
@@ -222,15 +240,18 @@ function handleGameOver(score) {
   setEl('go-combos', engine.maxCombo);
   setEl('go-pieces', engine.piecesPlaced);
   setEl('go-mode',   modeLabel(currentMode));
+
   const nb = $('go-new-best');
   if (nb) nb.style.display = (score >= d.bestScore && score > 0) ? 'flex' : 'none';
+
   setTimeout(() => showScreen('screen-gameover'), 350);
 }
 
 async function handleLevelWin(level, score) {
   clearInterval(timerInt);
   cancelAnimationFrame(animId);
-  TG.haptic('success');
+  renderer.hideDragFloat();
+  haptic('success');
   SoundEngine.levelWin();
   SoundEngine.stopMusic();
   const stars = await Storage.completeLevel(level.id, score);
@@ -248,21 +269,19 @@ function renderTray() {
     const piece = engine.pieces[i];
     slot.classList.toggle('used', !piece);
     if (piece) renderer.drawPiecePreview(canvas, piece, currentTheme);
-    else canvas.getContext('2d').clearRect(0,0,canvas.width,canvas.height);
+    else canvas.getContext('2d').clearRect(0, 0, canvas.width, canvas.height);
   }
 }
 
-// ── DRAG & DROP (MAGNETIC SNAP) ───────────────────────────────────────────────
+// ── DRAG & DROP ───────────────────────────────────────────────────────────────
 function setupDrag() {
   for (let i = 0; i < 3; i++) {
     const slot = $(`ps-${i}`);
-    if (!slot) continue;
-    slot.addEventListener('pointerdown', e => startDrag(e, i), { passive: false });
+    if (slot) slot.addEventListener('pointerdown', e => startDrag(e, i), { passive: false });
   }
-
-  document.addEventListener('pointermove', onDragMove, { passive: true });
-  document.addEventListener('pointerup',   onDragEnd);
-  document.addEventListener('pointercancel', cancelDrag);
+  window.addEventListener('pointermove',   onDragMove,   { passive: true });
+  window.addEventListener('pointerup',     onDragEnd);
+  window.addEventListener('pointercancel', cancelDrag);
 }
 
 function startDrag(e, idx) {
@@ -270,27 +289,37 @@ function startDrag(e, idx) {
   const piece = engine?.pieces[idx];
   if (!piece) return;
 
-  drag.active = true;
-  drag.idx    = idx;
-  drag.piece  = piece;
-  drag.snapCol= null;
-  drag.snapRow= null;
-  drag.valid  = false;
+  drag.active   = true;
+  drag.idx      = idx;
+  drag.piece    = piece;
+  drag.snapCol  = null;
+  drag.snapRow  = null;
+  drag.valid    = false;
+  drag.lastSnap = null;
 
-  const pt = e.touches ? e.touches[0] : e;
-  drag.pointerX = pt.clientX;
-  drag.pointerY = pt.clientY;
+  const pt = e.touches?.[0] || e;
+  drag.px = pt.clientX;
+  drag.py = pt.clientY;
+
+  // Show floating piece element above finger
+  renderer.showDragFloat(piece, drag.px, drag.py, currentTheme);
 
   $(`ps-${idx}`)?.classList.add('dragging');
-  TG.haptic('light');
+  haptic('light');
   SoundEngine.snap();
+
+  updateSnapPosition();
 }
 
 function onDragMove(e) {
   if (!drag.active) return;
-  const pt = e.touches ? e.touches[0] : e;
-  drag.pointerX = pt.clientX;
-  drag.pointerY = pt.clientY;
+  const pt = e.touches?.[0] || e;
+  drag.px = pt.clientX;
+  drag.py = pt.clientY;
+
+  // Move floating element
+  renderer.moveDragFloat(drag.px, drag.py);
+
   updateSnapPosition();
 }
 
@@ -300,27 +329,32 @@ function updateSnapPosition() {
 
   const rect = canvas.getBoundingClientRect();
   const cs   = renderer.cellSize;
+  const gs   = renderer.gridSize;
 
-  // Pointer offset: lift piece slightly above finger for visibility
-  const lx = drag.pointerX - rect.left;
-  const ly = drag.pointerY - rect.top - cs * 1.2; // lift 1.2 cells above touch point
+  // Map pointer to canvas space
+  // Offset: look slightly above the finger (1.8 cells) so the piece is visible
+  const lx = drag.px - rect.left;
+  const ly = drag.py - rect.top - cs * 1.6;
 
-  // Find grid cell under the hotspot (top-left of piece bounding box)
+  // Raw cell under hotspot (top-left of piece bounding box)
   const rawCol = Math.floor(lx / cs);
   const rawRow = Math.floor(ly / cs);
 
-  // Magnetic snap: find nearest valid position within ±1 cell radius
-  let bestCol = null, bestRow = null;
+  // Magnetic snap search: check a 3×3 radius around raw position
+  let bestCol  = null, bestRow = null;
   let bestDist = Infinity;
 
-  for (let dr = -1; dr <= 1; dr++) {
-    for (let dc = -1; dc <= 1; dc++) {
+  const pw = getPieceWidth(drag.piece);
+  const ph = getPieceHeight(drag.piece);
+
+  for (let dr = -2; dr <= 2; dr++) {
+    for (let dc = -2; dc <= 2; dc++) {
       const col = rawCol + dc;
       const row = rawRow + dr;
       if (engine.canPlace(drag.piece, col, row)) {
-        // Distance from ideal center
-        const cx = (col + getPieceWidth(drag.piece)  / 2) * cs;
-        const cy = (row + getPieceHeight(drag.piece) / 2) * cs;
+        // Score: distance from pointer to center of piece bounding box
+        const cx   = (col + pw / 2) * cs;
+        const cy   = (row + ph / 2) * cs;
         const dist = Math.hypot(lx - cx, ly - cy);
         if (dist < bestDist) {
           bestDist = dist;
@@ -331,15 +365,23 @@ function updateSnapPosition() {
     }
   }
 
-  // If no valid snap found nearby, just show at raw position
   if (bestCol !== null) {
     drag.snapCol = bestCol;
     drag.snapRow = bestRow;
     drag.valid   = true;
+
+    // Haptic tick when snapping to a NEW valid cell
+    const snapKey = `${bestCol},${bestRow}`;
+    if (drag.lastSnap !== snapKey) {
+      drag.lastSnap = snapKey;
+      haptic('light');
+    }
   } else {
+    // Show piece at raw position (red/invalid)
     drag.snapCol = rawCol;
     drag.snapRow = rawRow;
     drag.valid   = false;
+    drag.lastSnap = null;
   }
 }
 
@@ -350,38 +392,49 @@ function onDragEnd() {
     ? engine.placePiece(drag.idx, drag.snapCol, drag.snapRow)
     : false;
 
+  renderer.hideDragFloat();
+
   if (placed) {
     renderer.animatePlacement(drag.piece, drag.snapCol, drag.snapRow);
-    TG.haptic('light');
+    haptic('light');
     SoundEngine.place();
   } else {
-    TG.haptic('warning');
+    // Snap back animation
+    const slot = $(`ps-${drag.idx}`);
+    if (slot) {
+      slot.style.transform = 'scale(0.9)';
+      setTimeout(() => { slot.style.transform = ''; }, 200);
+    }
+    haptic('warning');
     SoundEngine.error();
   }
 
   $(`ps-${drag.idx}`)?.classList.remove('dragging');
-  drag.active = false;
-  drag.piece  = null;
-  drag.idx    = null;
-  drag.snapCol= null;
-  drag.snapRow= null;
-  drag.valid  = false;
+  drag.active   = false;
+  drag.piece    = null;
+  drag.idx      = null;
+  drag.snapCol  = null;
+  drag.snapRow  = null;
+  drag.valid    = false;
+  drag.lastSnap = null;
 
   renderTray();
 }
 
 function cancelDrag() {
+  renderer?.hideDragFloat();
   $(`ps-${drag.idx}`)?.classList.remove('dragging');
   drag.active = false;
   drag.piece  = null;
 }
 
-// ── TIMER / OBJECTIVE ─────────────────────────────────────────────────────────
+// ── TIMER ─────────────────────────────────────────────────────────────────────
 function updateTimer() {
   const el = $('timer-display');
   if (!el) return;
-  const m = Math.floor(timeLeft / 60), s = timeLeft % 60;
-  el.textContent = `${m}:${s.toString().padStart(2,'0')}`;
+  const m = Math.floor(timeLeft / 60);
+  const s = timeLeft % 60;
+  el.textContent = `${m}:${s.toString().padStart(2, '0')}`;
   el.classList.toggle('urgent', timeLeft <= 30);
 }
 
@@ -394,18 +447,20 @@ function updateGameUI() {
 
 function updateObjProgress() {
   const bar = $('objective-bar');
-  if (!bar || !currentLevel) { if(bar) bar.style.display='none'; return; }
+  if (!bar || !currentLevel) { if (bar) bar.style.display = 'none'; return; }
   bar.style.display = 'block';
   const obj = currentLevel.objective;
   setEl('obj-label', obj.label);
+
   let pct = 0;
   switch (obj.type) {
-    case 'score': case 'score_timed': pct = engine.score / obj.target; break;
-    case 'lines': case 'lines_timed': pct = engine.linesCleared / obj.target; break;
-    case 'columns': pct = engine.columnsCleared / obj.target; break;
-    case 'combo':   pct = engine.maxCombo / obj.target; break;
-    case 'pieces':  pct = engine.piecesPlaced / obj.target; break;
+    case 'score': case 'score_timed': pct = engine.score         / obj.target; break;
+    case 'lines': case 'lines_timed': pct = engine.linesCleared  / obj.target; break;
+    case 'columns':  pct = engine.columnsCleared / obj.target; break;
+    case 'combo':    pct = engine.maxCombo        / obj.target; break;
+    case 'pieces':   pct = engine.piecesPlaced    / obj.target; break;
   }
+
   const fill = $('obj-fill');
   if (fill) fill.style.width = Math.min(100, pct * 100) + '%';
 }
@@ -429,67 +484,60 @@ function showWinScreen(lv, score, stars) {
   setEl('win-name',   lv.title);
   setEl('win-score',  score);
   setEl('win-reward', `+${lv.reward}🪙`);
-  win.querySelectorAll('.win-star').forEach((s, i) => {
-    s.classList.toggle('lit', i < stars);
-  });
+  win.querySelectorAll('.win-star').forEach((s, i) => s.classList.toggle('lit', i < stars));
   win.classList.add('show');
 }
 
 // ── SETTINGS ──────────────────────────────────────────────────────────────────
 function buildSettingsScreen() {
   const d = Storage.get();
-  const settings = d.settings || {};
+  const s = d.settings || {};
 
-  // Music toggle
-  const musicToggle = $('toggle-music');
-  if (musicToggle) {
-    musicToggle.checked = settings.music !== false;
-    musicToggle.onchange = async () => {
-      SoundEngine.musicEnabled = musicToggle.checked;
-      if (musicToggle.checked) SoundEngine.startMusic();
-      else SoundEngine.stopMusic();
-      await saveSettings({ music: musicToggle.checked });
+  const musicT = $('toggle-music');
+  if (musicT) {
+    musicT.checked = s.music !== false;
+    musicT.onchange = async () => {
+      SoundEngine.musicEnabled = musicT.checked;
+      musicT.checked ? SoundEngine.startMusic() : SoundEngine.stopMusic();
+      await saveSettings({ music: musicT.checked });
     };
   }
 
-  // SFX toggle
-  const sfxToggle = $('toggle-sfx');
-  if (sfxToggle) {
-    sfxToggle.checked = settings.sfx !== false;
-    sfxToggle.onchange = async () => {
-      SoundEngine.sfxEnabled = sfxToggle.checked;
-      await saveSettings({ sfx: sfxToggle.checked });
+  const sfxT = $('toggle-sfx');
+  if (sfxT) {
+    sfxT.checked = s.sfx !== false;
+    sfxT.onchange = async () => {
+      SoundEngine.sfxEnabled = sfxT.checked;
+      await saveSettings({ sfx: sfxT.checked });
     };
   }
 
-  // Music volume
+  const hapticT = $('toggle-haptic');
+  if (hapticT) {
+    hapticT.checked = s.haptic !== false;
+    hapticT.onchange = async () => await saveSettings({ haptic: hapticT.checked });
+  }
+
   const musicVol = $('slider-music-vol');
   if (musicVol) {
-    musicVol.value = settings.musicVol !== undefined ? settings.musicVol : 70;
+    musicVol.value = s.musicVol ?? 55;
     musicVol.oninput = () => {
       SoundEngine.setMusicVolume(musicVol.value / 100);
-      saveSettings({ musicVol: parseInt(musicVol.value) });
+      saveSettings({ musicVol: +musicVol.value });
     };
   }
 
-  // SFX volume
   const sfxVol = $('slider-sfx-vol');
   if (sfxVol) {
-    sfxVol.value = settings.sfxVol !== undefined ? settings.sfxVol : 80;
+    sfxVol.value = s.sfxVol ?? 55;
     sfxVol.oninput = () => {
       SoundEngine.setSfxVolume(sfxVol.value / 100);
-      saveSettings({ sfxVol: parseInt(sfxVol.value) });
+      saveSettings({ sfxVol: +sfxVol.value });
     };
   }
 
-  // Haptic toggle
-  const hapticToggle = $('toggle-haptic');
-  if (hapticToggle) {
-    hapticToggle.checked = settings.haptic !== false;
-    hapticToggle.onchange = async () => {
-      await saveSettings({ haptic: hapticToggle.checked });
-    };
-  }
+  const usr = $('settings-user');
+  if (usr) usr.textContent = TG.getUsername() || TG.getFirstName() || 'Guest';
 }
 
 async function saveSettings(patch) {
@@ -502,30 +550,31 @@ async function saveSettings(patch) {
 function buildStoryScreen() {
   const grid = $('story-grid');
   if (!grid) return;
-  const d   = Storage.get();
+  const d = Storage.get();
   grid.innerHTML = '';
 
   STORY_LEVELS.forEach(lv => {
-    const unlocked = lv.id === 1 || lv.id <= (d.storyProgress || 0) + 1;
+    const prog     = d.storyProgress || 0;
+    const unlocked = lv.id === 1 || lv.id <= prog + 1;
     const stars    = d.storyStars?.[lv.id] || 0;
-    const isCur    = lv.id === (d.storyProgress || 0) + 1;
+    const isCur    = lv.id === prog + 1;
 
     const div = document.createElement('div');
-    div.className = `lv-card ${unlocked ? '' : 'lv-locked'} ${stars===3?'lv-3star':''} ${isCur?'lv-current':''}`;
+    div.className = `lv-card ${!unlocked ? 'lv-locked' : ''} ${stars === 3 ? 'lv-3star' : ''} ${isCur ? 'lv-current' : ''}`;
     div.innerHTML = `
       <div class="lv-num">${lv.id}</div>
       <div class="lv-name">${lv.title}</div>
       <div class="lv-stars">${'★'.repeat(stars)}${'☆'.repeat(3-stars)}</div>
       ${!unlocked ? '<div class="lv-lock">🔒</div>' : ''}
     `;
-    if (unlocked) div.addEventListener('click', () => { SoundEngine.button(); TG.haptic('light'); startGame('story', lv); });
+    if (unlocked) {
+      div.addEventListener('click', () => { haptic('light'); SoundEngine.button(); startGame('story', lv); });
+    }
     grid.appendChild(div);
   });
 
-  // Progress bar
   const fill = $('story-fill');
-  const pct  = ((d.storyProgress || 0) / 20) * 100;
-  if (fill) fill.style.width = pct + '%';
+  if (fill) fill.style.width = (((d.storyProgress || 0) / 20) * 100) + '%';
   setEl('story-count', `${d.storyProgress || 0}/20`);
 }
 
@@ -540,13 +589,10 @@ function buildThemesScreen() {
     const owned = !t.locked || d.achievements?.['theme_' + key];
     const card  = document.createElement('div');
     card.className = `theme-card ${key === currentTheme ? 'active' : ''}`;
-    card.style.cssText = `background:${t.bg};border-color:${key===currentTheme?t.accent:t.border||'rgba(255,255,255,0.07)'}`;
-
-    const swatches = t.blocks.slice(0,4).map(c =>
-      `<div class="tsw-cell" style="background:${c}"></div>`).join('');
+    card.style.cssText = `background:${t.bg};border-color:${key === currentTheme ? t.accent : (t.border || 'rgba(255,255,255,0.07)')}`;
 
     card.innerHTML = `
-      <div class="theme-swatch">${swatches}</div>
+      <div class="theme-swatch">${t.blocks.slice(0,4).map(c => `<div class="tsw-cell" style="background:${c}"></div>`).join('')}</div>
       <div class="theme-label">
         <span class="theme-emoji">${t.emoji}</span>
         <span class="theme-name" style="color:${t.text}">${t.name}</span>
@@ -556,22 +602,20 @@ function buildThemesScreen() {
     `;
 
     card.addEventListener('click', async () => {
-      SoundEngine.button();
+      SoundEngine.button(); haptic('light');
       if (!owned) {
         const ok = await Storage.spendCoins(t.price || 50);
-        if (!ok) { TG.haptic('error'); showToast('Not enough coins 🪙'); return; }
+        if (!ok) { haptic('error'); showToast('Not enough coins 🪙'); return; }
         d.achievements = d.achievements || {};
         d.achievements['theme_' + key] = Date.now();
         await Storage.save();
-        TG.haptic('success');
+        haptic('success');
       }
       currentTheme = key;
       applyTheme(key);
       await Storage.setTheme(key);
       if (renderer) renderer.theme = key;
-      TG.haptic('light');
-      buildThemesScreen();
-      buildMenuUI();
+      buildThemesScreen(); buildMenuUI();
     });
     grid.appendChild(card);
   });
@@ -580,25 +624,24 @@ function buildThemesScreen() {
 // ── STATS SCREEN ──────────────────────────────────────────────────────────────
 function buildStatsScreen() {
   const d = Storage.get(), st = d.stats || {};
-  const rows = [
-    ['🏆','Best Score',    (d.bestScore||0).toLocaleString()],
-    ['📊','Total Score',   (d.totalScore||0).toLocaleString()],
-    ['🎮','Games Played',  (d.gamesPlayed||0).toLocaleString()],
-    ['➖','Lines Cleared', (st.linesCleared||0).toLocaleString()],
-    ['🧩','Pieces Placed', (st.piecesPlaced||0).toLocaleString()],
-    ['⚡','Max Combo',     st.maxCombo||0],
-    ['✨','Perfect Clears',st.perfectClears||0],
-    ['🪙','Coins',         (d.coins||0).toLocaleString()],
-    ['📖','Story Levels',  `${d.storyProgress||0}/20`],
-  ];
   const el = $('stats-content');
   if (!el) return;
-  el.innerHTML = `<div class="stats-group">${rows.map(([ico,name,val])=>`
-    <div class="stat-row">
-      <div class="stat-ico">${ico}</div>
-      <div class="stat-info"><div class="stat-name">${name}</div></div>
-      <div class="stat-val">${val}</div>
-    </div>`).join('')}</div>`;
+
+  const rows = [
+    ['🏆', 'Best Score',     (d.bestScore   || 0).toLocaleString()],
+    ['📊', 'Total Score',    (d.totalScore  || 0).toLocaleString()],
+    ['🎮', 'Games Played',   (d.gamesPlayed || 0).toLocaleString()],
+    ['➖', 'Lines Cleared',  (st.linesCleared || 0).toLocaleString()],
+    ['🧩', 'Pieces Placed',  (st.piecesPlaced || 0).toLocaleString()],
+    ['⚡', 'Max Combo',      st.maxCombo || 0],
+    ['✨', 'Perfect Clears', st.perfectClears || 0],
+    ['🪙', 'Coins',          (d.coins || 0).toLocaleString()],
+    ['📖', 'Story Levels',   `${d.storyProgress || 0}/20`],
+  ];
+
+  el.innerHTML = `<div class="stats-group">${rows.map(([ico, name, val]) =>
+    `<div class="stat-row"><div class="stat-ico">${ico}</div><div class="stat-info"><div class="stat-name">${name}</div></div><div class="stat-val">${val}</div></div>`
+  ).join('')}</div>`;
 }
 
 // ── ACHIEVEMENTS SCREEN ───────────────────────────────────────────────────────
@@ -608,12 +651,9 @@ function buildAchievementsScreen() {
   if (!el) return;
   el.innerHTML = `<div class="ach-list">${Object.values(ACHIEVEMENTS).map(a => {
     const done = !!d.achievements?.[a.id];
-    return `<div class="ach-card ${done?'done':''}">
-      <div class="ach-ico">${done?'🏆':'🔒'}</div>
-      <div class="ach-body">
-        <div class="ach-name">${a.label}</div>
-        <div class="ach-desc">${a.desc}</div>
-      </div>
+    return `<div class="ach-card ${done ? 'done' : ''}">
+      <div class="ach-ico">${done ? '🏆' : '🔒'}</div>
+      <div class="ach-body"><div class="ach-name">${a.label}</div><div class="ach-desc">${a.desc}</div></div>
       ${done ? '<div class="ach-done">✓</div>' : `<div class="ach-badge">+${a.coins}🪙</div>`}
     </div>`;
   }).join('')}</div>`;
@@ -621,7 +661,7 @@ function buildAchievementsScreen() {
 
 // ── ACHIEVEMENT TOAST ──────────────────────────────────────────────────────────
 function showAchToast(a) {
-  SoundEngine.achievement();
+  SoundEngine.achievement(); haptic('success');
   const el = document.createElement('div');
   el.className = 'ach-toast';
   el.innerHTML = `<div class="ach-t-ico">🏆</div><div class="ach-t-body"><div class="ach-t-name">${a.label}</div><div class="ach-t-desc">${a.desc}</div></div><div class="ach-t-coins">+${a.coins}🪙</div>`;
@@ -642,8 +682,7 @@ function showToast(msg) {
 
 // ── HELPERS ───────────────────────────────────────────────────────────────────
 function modeLabel(m) {
-  return { classic:'Classic', timed:'Timed', challenge:'Challenge',
-           zen:'Zen', hard:'Hard', story:'Story' }[m] || m;
+  return { classic:'Classic', timed:'Timed', challenge:'Challenge', zen:'Zen', hard:'Hard', story:'Story' }[m] || m;
 }
 
 function togglePause() {
@@ -653,7 +692,7 @@ function togglePause() {
     cancelAnimationFrame(animId);
     $('pause-overlay')?.classList.add('show');
     SoundEngine.stopMusic();
-    TG.haptic('light');
+    haptic('light');
   } else {
     $('pause-overlay')?.classList.remove('show');
     loop();
@@ -666,82 +705,72 @@ async function doUndo() {
   if (engine.usedUndo) { showToast('Undo already used'); return; }
   engine.undo();
   renderTray(); updateGameUI();
-  TG.haptic('light'); SoundEngine.button();
-  $('btn-undo').disabled = true;
+  haptic('light'); SoundEngine.button();
+  const b = $('btn-undo');
+  if (b) b.disabled = true;
 }
 
 async function doShuffle() {
   if (!engine) return;
   const ok = await Storage.spendCoins(5);
-  if (!ok) { showToast('Need 5 🪙 to shuffle'); TG.haptic('error'); return; }
+  if (!ok) { showToast('Need 5 🪙 to shuffle'); haptic('error'); return; }
   engine.shuffle();
   renderTray();
-  TG.haptic('medium'); SoundEngine.button();
+  haptic('medium'); SoundEngine.button();
   buildMenuUI();
 }
 
-// ── EVENT LISTENERS ───────────────────────────────────────────────────────────
+// ── LISTENERS ─────────────────────────────────────────────────────────────────
+function btn(id, fn) {
+  $(id)?.addEventListener('click', () => { SoundEngine.button(); haptic('light'); fn(); });
+}
+
 function setupListeners() {
-  // Menu
-  $('btn-play')?.addEventListener('click', () => { SoundEngine.button(); TG.haptic('light'); startGame('classic'); });
-  $('btn-modes')?.addEventListener('click', () => { SoundEngine.button(); TG.haptic('light'); showScreen('screen-modes'); });
-  $('btn-story')?.addEventListener('click', () => { SoundEngine.button(); TG.haptic('light'); buildStoryScreen(); showScreen('screen-story'); });
-  $('btn-themes')?.addEventListener('click', () => { SoundEngine.button(); TG.haptic('light'); buildThemesScreen(); showScreen('screen-themes'); });
-  $('btn-stats')?.addEventListener('click', () => { SoundEngine.button(); TG.haptic('light'); buildStatsScreen(); showScreen('screen-stats'); });
-  $('btn-achievements')?.addEventListener('click', () => { SoundEngine.button(); TG.haptic('light'); buildAchievementsScreen(); showScreen('screen-achievements'); });
-  $('btn-settings')?.addEventListener('click', () => { SoundEngine.button(); TG.haptic('light'); buildSettingsScreen(); showScreen('screen-settings'); });
+  btn('btn-play',         () => startGame('classic'));
+  btn('btn-modes',        () => showScreen('screen-modes'));
+  btn('btn-story',        () => { buildStoryScreen(); showScreen('screen-story'); });
+  btn('btn-themes',       () => { buildThemesScreen(); showScreen('screen-themes'); });
+  btn('btn-stats',        () => { buildStatsScreen(); showScreen('screen-stats'); });
+  btn('btn-achievements', () => { buildAchievementsScreen(); showScreen('screen-achievements'); });
+  btn('btn-settings',     () => { buildSettingsScreen(); showScreen('screen-settings'); });
 
   // Mode cards
-  document.querySelectorAll('[data-mode]').forEach(btn => {
-    btn.addEventListener('click', () => { SoundEngine.button(); TG.haptic('light'); startGame(btn.dataset.mode); });
+  document.querySelectorAll('[data-mode]').forEach(el => {
+    el.addEventListener('click', () => { SoundEngine.button(); haptic('light'); startGame(el.dataset.mode); });
   });
 
   // Random story buttons
-  $('btn-rand-easy')?.addEventListener('click', () => { SoundEngine.button(); startGame('story', generateRandomLevel(Math.floor(Math.random()*8)+1)); });
-  $('btn-rand-hard')?.addEventListener('click', () => { SoundEngine.button(); startGame('story', generateRandomLevel(Math.floor(Math.random()*8)+11)); });
+  $('btn-rand-easy')?.addEventListener('click', () => startGame('story', generateRandomLevel(Math.floor(Math.random()*8)+1)));
+  $('btn-rand-hard')?.addEventListener('click', () => startGame('story', generateRandomLevel(Math.floor(Math.random()*8)+11)));
 
   // Back buttons
-  document.querySelectorAll('[data-back]').forEach(btn => {
-    btn.addEventListener('click', () => { SoundEngine.button(); TG.haptic('light'); showScreen(btn.dataset.back); });
+  document.querySelectorAll('[data-back]').forEach(el => {
+    el.addEventListener('click', () => { SoundEngine.button(); haptic('light'); showScreen(el.dataset.back); });
   });
 
   // Game controls
   $('btn-pause')?.addEventListener('click', togglePause);
-  $('btn-undo')?.addEventListener('click',  doUndo);
+  $('btn-undo')?.addEventListener('click', doUndo);
   $('btn-shuffle')?.addEventListener('click', doShuffle);
 
-  // Resume
-  $('btn-resume')?.addEventListener('click', () => { togglePause(); });
-  $('btn-pause-menu')?.addEventListener('click', () => {
-    isPaused = false;
-    $('pause-overlay')?.classList.remove('show');
-    SoundEngine.stopMusic();
-    buildMenuUI(); showScreen('screen-menu');
-  });
+  // Pause overlay
+  btn('btn-resume',     () => togglePause());
+  btn('btn-pause-menu', () => { isPaused = false; $('pause-overlay')?.classList.remove('show'); SoundEngine.stopMusic(); buildMenuUI(); showScreen('screen-menu'); });
 
   // Game over
-  $('btn-play-again')?.addEventListener('click', () => { SoundEngine.button(); startGame(currentMode, currentLevel); });
-  $('btn-go-menu')?.addEventListener('click', () => { SoundEngine.button(); buildMenuUI(); showScreen('screen-menu'); });
-  $('btn-share')?.addEventListener('click', () => { SoundEngine.button(); TG.shareScore(engine?.score || 0, modeLabel(currentMode)); });
+  btn('btn-play-again', () => startGame(currentMode, currentLevel));
+  btn('btn-go-menu',    () => { buildMenuUI(); showScreen('screen-menu'); });
+  btn('btn-share',      () => TG.shareScore(engine?.score || 0, modeLabel(currentMode)));
 
   // Level win
-  $('btn-next-level')?.addEventListener('click', () => {
-    SoundEngine.button();
+  btn('btn-next-level', () => {
     $('level-win')?.classList.remove('show');
     const next = STORY_LEVELS.find(l => l.id === (currentLevel?.id || 0) + 1);
     if (next) startGame('story', next);
     else { buildMenuUI(); showScreen('screen-menu'); }
   });
-  $('btn-retry')?.addEventListener('click', () => {
-    SoundEngine.button();
-    $('level-win')?.classList.remove('show');
-    startGame('story', currentLevel);
-  });
-  $('btn-win-menu')?.addEventListener('click', () => {
-    SoundEngine.button();
-    $('level-win')?.classList.remove('show');
-    buildMenuUI(); showScreen('screen-menu');
-  });
+  btn('btn-retry',      () => { $('level-win')?.classList.remove('show'); startGame('story', currentLevel); });
+  btn('btn-win-menu',   () => { $('level-win')?.classList.remove('show'); buildMenuUI(); showScreen('screen-menu'); });
 
   // Resize
   window.addEventListener('resize', () => renderer?.resize());
