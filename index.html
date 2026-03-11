@@ -1,264 +1,474 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-  <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover, maximum-scale=1.0, user-scalable=no" />
-  <meta name="apple-mobile-web-app-capable" content="yes" />
-  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
-  <meta name="theme-color" content="#0a0a0f" />
+  <meta charset="UTF-8"/>
+  <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover,maximum-scale=1,user-scalable=no"/>
+  <meta name="apple-mobile-web-app-capable" content="yes"/>
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent"/>
+  <meta name="theme-color" content="#0c0c10"/>
   <title>Block Blast</title>
-  <link rel="stylesheet" href="css/style.css" />
-  <!-- Telegram Mini App SDK -->
+  <link rel="stylesheet" href="css/style.css"/>
   <script src="https://telegram.org/js/telegram-web-app.js"></script>
 </head>
 <body>
 <div id="app">
 
-  <!-- ═══════════════════ MENU SCREEN ═══════════════════ -->
-  <div id="screen-menu" class="screen active">
-    <div class="menu-card">
-      <div class="menu-header">
-        <span class="menu-logo">🧩</span>
-        <h1 class="menu-title">Block Blast</h1>
-        <p class="menu-subtitle">Place • Clear • Score</p>
-      </div>
+<!-- ══════════════════════════════════════════
+     MENU
+══════════════════════════════════════════ -->
+<div id="screen-menu" class="screen active">
+  <div class="menu-inner">
 
-      <div class="menu-user-row">
-        <div class="user-avatar" id="menu-avatar">P</div>
-        <span id="menu-username">Player</span>
-        <span style="color:var(--text-sub);font-size:12px">·</span>
-        <span style="font-size:13px;font-weight:600">🪙 <span id="menu-coins">0</span></span>
-      </div>
-
-      <div class="menu-stats-row">
-        <div class="menu-stat">
-          <div class="menu-stat-val" id="menu-best">0</div>
-          <div class="menu-stat-label">Best</div>
-        </div>
-        <div class="menu-stat">
-          <div class="menu-stat-val" id="menu-story">0/20</div>
-          <div class="menu-stat-label">Story</div>
+    <div class="menu-hero">
+      <!-- Logo grid -->
+      <div class="menu-logo-wrap">
+        <div class="logo-grid">
+          <div class="logo-cell"></div>
+          <div class="logo-cell"></div>
+          <div class="logo-cell"></div>
+          <div class="logo-cell"></div>
+          <div class="logo-cell"></div>
+          <div class="logo-cell"></div>
+          <div class="logo-cell"></div>
+          <div class="logo-cell"></div>
+          <div class="logo-cell"></div>
         </div>
       </div>
 
-      <button class="btn btn-primary" id="btn-classic">
-        ▶ Play Classic
-      </button>
+      <h1 class="menu-title">Block Blast</h1>
+      <p class="menu-tagline">Place · Clear · Score</p>
 
-      <div class="menu-grid" style="margin-top:10px">
-        <button class="btn btn-secondary" id="btn-modes">🎮 Modes</button>
-        <button class="btn btn-secondary" id="btn-story">📖 Story</button>
-        <button class="btn btn-secondary" id="btn-themes">🎨 Themes</button>
-        <button class="btn btn-secondary" id="btn-stats">📊 Stats</button>
-        <button class="btn btn-secondary" id="btn-achievements" style="grid-column:span 2">🏆 Achievements</button>
+      <!-- User pill -->
+      <div class="menu-user">
+        <div class="user-av" id="menu-avatar-char">P</div>
+        <span class="user-name" id="menu-username">Player</span>
+        <span class="user-coins">🪙 <span id="menu-coins">0</span></span>
+      </div>
+
+      <!-- Stats row -->
+      <div class="menu-stats">
+        <div class="menu-stat">
+          <div class="mstat-val" id="menu-best">0</div>
+          <div class="mstat-label">Best</div>
+        </div>
+        <div class="mstat-div"></div>
+        <div class="menu-stat">
+          <div class="mstat-val" id="menu-story-stat">0/20</div>
+          <div class="mstat-label">Story</div>
+        </div>
+        <div class="mstat-div"></div>
+        <div class="menu-stat">
+          <div class="mstat-val" id="menu-games">0</div>
+          <div class="mstat-label">Games</div>
+        </div>
       </div>
     </div>
+
+    <!-- Buttons -->
+    <div class="menu-actions">
+      <button class="btn btn-xl" id="btn-play">▶&nbsp; Play Classic</button>
+      <div class="menu-row">
+        <button class="btn btn-lg" id="btn-modes">🎮&nbsp; Modes</button>
+        <button class="btn btn-lg" id="btn-story">📖&nbsp; Story</button>
+      </div>
+      <div class="menu-row">
+        <button class="btn btn-lg" id="btn-themes">🎨&nbsp; Themes</button>
+        <button class="btn btn-lg" id="btn-stats">📊&nbsp; Stats</button>
+      </div>
+      <div class="menu-row">
+        <button class="btn btn-lg" id="btn-achievements">🏆&nbsp; Achievements</button>
+        <button class="btn btn-lg" id="btn-settings">⚙️&nbsp; Settings</button>
+      </div>
+    </div>
+
   </div>
+</div>
 
-  <!-- ═══════════════════ MODES SCREEN ═══════════════════ -->
-  <div id="screen-modes" class="screen hidden">
-    <div class="nav-header">
-      <div class="nav-back" data-back="screen-menu">‹</div>
-      <h2 class="nav-title">Game Modes</h2>
-    </div>
-    <div class="scroll-content">
-      <div class="modes-grid">
-        <div class="mode-card" data-mode="classic">
-          <span class="mode-icon">♾️</span>
+<!-- ══════════════════════════════════════════
+     MODES
+══════════════════════════════════════════ -->
+<div id="screen-modes" class="screen hidden">
+  <div class="nav-bar">
+    <div class="nav-back" data-back="screen-menu">‹</div>
+    <span class="nav-title">Game Modes</span>
+    <span></span>
+  </div>
+  <div class="scroll-area">
+    <div class="modes-list">
+      <div class="mode-card" data-mode="classic">
+        <div class="mode-icon-wrap">♾️</div>
+        <div class="mode-text">
           <div class="mode-name">Classic</div>
-          <div class="mode-desc">Endless play. Beat your best score.</div>
+          <div class="mode-desc">Endless — beat your all-time best</div>
         </div>
-        <div class="mode-card" data-mode="timed">
-          <span class="mode-icon">⏱️</span>
+        <div class="mode-arrow">›</div>
+      </div>
+      <div class="mode-card" data-mode="timed">
+        <div class="mode-icon-wrap">⏱</div>
+        <div class="mode-text">
           <div class="mode-name">Timed</div>
-          <div class="mode-desc">3 minutes. Max score wins.</div>
+          <div class="mode-desc">3 minutes — score as high as possible</div>
         </div>
-        <div class="mode-card" data-mode="zen">
-          <span class="mode-icon">🧘</span>
+        <div class="mode-arrow">›</div>
+      </div>
+      <div class="mode-card" data-mode="zen">
+        <div class="mode-icon-wrap">🧘</div>
+        <div class="mode-text">
           <div class="mode-name">Zen</div>
-          <div class="mode-desc">No game over. Just chill.</div>
+          <div class="mode-desc">No game over — relaxed, no pressure</div>
         </div>
-        <div class="mode-card" data-mode="hard">
-          <span class="mode-icon">💀</span>
+        <div class="mode-arrow">›</div>
+      </div>
+      <div class="mode-card" data-mode="hard">
+        <div class="mode-icon-wrap">💀</div>
+        <div class="mode-text">
           <div class="mode-name">Hard</div>
-          <div class="mode-desc">10×10 grid, tough pieces.</div>
+          <div class="mode-desc">10 × 10 grid with tougher pieces</div>
         </div>
-        <div class="mode-card" data-mode="challenge" style="grid-column:span 2">
-          <span class="mode-icon">⚡</span>
+        <div class="mode-arrow">›</div>
+      </div>
+      <div class="mode-card" data-mode="challenge">
+        <div class="mode-icon-wrap">⚡</div>
+        <div class="mode-text">
           <div class="mode-name">Challenge</div>
-          <div class="mode-desc">Daily objectives. Complete all 3 to earn coins.</div>
+          <div class="mode-desc">Daily objectives · earn bonus coins</div>
         </div>
+        <div class="mode-arrow">›</div>
       </div>
     </div>
   </div>
+</div>
 
-  <!-- ═══════════════════ STORY SCREEN ═══════════════════ -->
-  <div id="screen-story" class="screen hidden">
-    <div class="nav-header">
-      <div class="nav-back" data-back="screen-menu">‹</div>
-      <h2 class="nav-title">Story Mode</h2>
+<!-- ══════════════════════════════════════════
+     STORY
+══════════════════════════════════════════ -->
+<div id="screen-story" class="screen hidden">
+  <div class="nav-bar">
+    <div class="nav-back" data-back="screen-menu">‹</div>
+    <span class="nav-title">Story Mode</span>
+    <span></span>
+  </div>
+  <div class="scroll-area">
+    <!-- Progress -->
+    <div class="story-progress">
+      <span class="sp-label">Progress</span>
+      <div class="sp-track"><div class="sp-fill" id="story-fill" style="width:0%"></div></div>
+      <span class="sp-count" id="story-count">0/20</span>
     </div>
-    <div class="scroll-content">
-      <p style="font-size:13px;color:var(--text-sub);margin-bottom:4px">
-        20 levels of increasing challenge. Each tells a story.
-      </p>
-      <div class="story-grid" id="story-grid"></div>
-
-      <!-- Random Level Generator -->
-      <div style="margin-top:24px;padding-top:20px;border-top:1px solid var(--border)">
-        <div style="font-size:15px;font-weight:700;margin-bottom:4px">🎲 Random Levels</div>
-        <div style="font-size:12px;color:var(--text-sub);margin-bottom:12px">Endless procedurally generated puzzles</div>
-        <div style="display:flex;gap:10px">
-          <button class="btn btn-secondary" style="flex:1;font-size:13px" onclick="startGame('story', generateRandomLevel(Math.floor(Math.random()*15)+1))">Easy Random</button>
-          <button class="btn btn-secondary" style="flex:1;font-size:13px" onclick="startGame('story', generateRandomLevel(Math.floor(Math.random()*10)+11))">Hard Random</button>
-        </div>
+    <!-- Level grid -->
+    <div class="story-grid" id="story-grid"></div>
+    <!-- Random -->
+    <div class="rand-section">
+      <h3>🎲 Random Levels</h3>
+      <p>Endless procedurally generated puzzles</p>
+      <div class="rand-row">
+        <button class="btn btn-md" id="btn-rand-easy">😊 Easy</button>
+        <button class="btn btn-md" id="btn-rand-hard">💀 Hard</button>
       </div>
     </div>
   </div>
+</div>
 
-  <!-- ═══════════════════ GAME SCREEN ═══════════════════ -->
-  <div id="screen-game" class="screen hidden">
+<!-- ══════════════════════════════════════════
+     GAME
+══════════════════════════════════════════ -->
+<div id="screen-game" class="screen hidden">
 
-    <!-- Header: score + controls -->
-    <div class="game-header">
-      <div style="display:flex;align-items:center;gap:8px">
-        <div class="btn-icon btn" id="btn-pause" style="font-size:16px">⏸</div>
-        <div class="game-score-group">
-          <span class="score-label">Score</span>
-          <span class="score-value" id="score-value">0</span>
-        </div>
-      </div>
-
-      <div style="display:flex;align-items:center;gap:6px">
-        <div id="timer-display" style="display:none">3:00</div>
-        <div class="game-score-group" style="align-items:flex-end">
-          <span class="score-label">Best</span>
-          <span class="score-value" id="best-value" style="font-size:18px;color:var(--text-sub)">0</span>
-        </div>
+  <!-- Top bar -->
+  <div class="game-topbar">
+    <!-- Score -->
+    <div style="display:flex;align-items:center;gap:10px">
+      <button class="btn btn-ico" id="btn-pause" title="Pause">⏸</button>
+      <div class="score-block">
+        <span class="sc-label">Score</span>
+        <span class="sc-value" id="score-val">0</span>
       </div>
     </div>
 
-    <!-- Objective Bar -->
-    <div id="objective-bar">
-      <div class="obj-row">
-        <span id="obj-label">Objective</span>
-        <div class="obj-track"><div id="obj-fill"></div></div>
-      </div>
+    <!-- Center: timer or empty -->
+    <div style="display:flex;justify-content:center">
+      <div id="timer-display">3:00</div>
     </div>
 
-    <!-- Canvas -->
-    <div class="game-canvas-wrap">
-      <canvas id="game-canvas"></canvas>
+    <!-- Best -->
+    <div class="score-block" style="align-items:flex-end">
+      <span class="sc-label">Best</span>
+      <span class="sc-value" id="best-val" style="font-size:18px;color:var(--text-2)">0</span>
     </div>
-
-    <!-- Piece Tray -->
-    <div class="piece-tray" id="piece-tray">
-      <div class="piece-wrap" id="piece-wrap-0">
-        <canvas id="piece-canvas-0" width="110" height="110"></canvas>
-      </div>
-      <div class="piece-wrap" id="piece-wrap-1">
-        <canvas id="piece-canvas-1" width="110" height="110"></canvas>
-      </div>
-      <div class="piece-wrap" id="piece-wrap-2">
-        <canvas id="piece-canvas-2" width="110" height="110"></canvas>
-      </div>
-    </div>
-
-    <!-- Action row -->
-    <div style="display:flex;gap:10px;padding:0 16px 12px;width:100%;max-width:420px">
-      <button class="btn btn-secondary" id="btn-undo" style="flex:1;font-size:14px;padding:11px">↩ Undo</button>
-      <button class="btn btn-ghost" id="btn-shuffle" style="flex:1;font-size:14px;padding:11px">🔀 Shuffle <span style="font-size:11px;opacity:0.6">(5🪙)</span></button>
-    </div>
-
   </div>
 
-  <!-- ═══════════════════ GAME OVER SCREEN ═══════════════════ -->
-  <div id="screen-gameover" class="screen hidden">
-    <div class="go-card">
+  <!-- Objective bar (story mode) -->
+  <div id="objective-bar">
+    <div class="obj-inner">
+      <span id="obj-label">Objective</span>
+      <div class="obj-track"><div id="obj-fill"></div></div>
+    </div>
+  </div>
+
+  <!-- Canvas -->
+  <div class="canvas-wrap">
+    <canvas id="game-canvas"></canvas>
+  </div>
+
+  <!-- Piece tray -->
+  <div class="piece-tray">
+    <div class="piece-slot" id="ps-0"><canvas id="pc-0" width="100" height="100"></canvas></div>
+    <div class="piece-slot" id="ps-1"><canvas id="pc-1" width="100" height="100"></canvas></div>
+    <div class="piece-slot" id="ps-2"><canvas id="pc-2" width="100" height="100"></canvas></div>
+  </div>
+
+  <!-- Action buttons -->
+  <div class="game-actions">
+    <button class="ga-btn" id="btn-undo">
+      <span class="ga-icon">↩</span>
+      <span class="ga-label">Undo</span>
+    </button>
+    <button class="ga-btn" id="btn-shuffle">
+      <span class="ga-icon">🔀</span>
+      <span class="ga-label">Shuffle (5🪙)</span>
+    </button>
+    <button class="ga-btn" onclick="showScreen('screen-menu');isPaused=false;SoundEngine.stopMusic();buildMenuUI();">
+      <span class="ga-icon">🏠</span>
+      <span class="ga-label">Menu</span>
+    </button>
+  </div>
+
+</div>
+
+<!-- ══════════════════════════════════════════
+     GAME OVER
+══════════════════════════════════════════ -->
+<div id="screen-gameover" class="screen hidden">
+  <div class="go-wrap">
+    <div class="go-top">
       <span class="go-emoji">💥</span>
       <div class="go-title">Game Over</div>
-      <div class="go-mode" id="go-mode">Classic</div>
+      <div class="go-sub" id="go-mode">Classic Mode</div>
+    </div>
 
-      <div class="go-score-display">
+    <div class="go-score-area">
+      <div class="go-score-main">
         <span class="go-score-num" id="go-score">0</span>
-        <div class="go-score-label">Score</div>
+        <div class="go-score-lbl">Score</div>
       </div>
-
-      <div class="go-new-best" id="go-new-best">🎉 New Best!</div>
-
-      <div class="go-stats-row">
-        <div class="go-stat">
-          <div class="go-stat-val" id="go-best">0</div>
-          <div class="go-stat-label">Best</div>
-        </div>
-        <div class="go-stat">
-          <div class="go-stat-val" id="go-lines">0</div>
-          <div class="go-stat-label">Lines</div>
-        </div>
-        <div class="go-stat">
-          <div class="go-stat-val" id="go-combos">0</div>
-          <div class="go-stat-label">Max Combo</div>
-        </div>
-      </div>
-
-      <div class="go-buttons">
-        <button class="btn btn-primary" id="btn-play-again">▶ Play Again</button>
-        <div style="display:flex;gap:10px">
-          <button class="btn btn-secondary" id="btn-share" style="flex:1">📤 Share</button>
-          <button class="btn btn-secondary" id="btn-menu" style="flex:1">🏠 Menu</button>
-        </div>
+      <div class="go-divider"></div>
+      <div class="go-best-block">
+        <div class="go-best-num" id="go-best">0</div>
+        <div class="go-best-lbl">Best</div>
       </div>
     </div>
-  </div>
 
-  <!-- ═══════════════════ THEMES SCREEN ═══════════════════ -->
-  <div id="screen-themes" class="screen hidden">
-    <div class="nav-header">
-      <div class="nav-back" data-back="screen-menu">‹</div>
-      <h2 class="nav-title">Themes</h2>
-    </div>
-    <div class="scroll-content">
-      <p style="font-size:13px;color:var(--text-sub);margin-bottom:4px">Locked themes cost coins</p>
-      <div class="themes-grid" id="themes-grid"></div>
-    </div>
-  </div>
+    <div class="go-new-best" id="go-new-best">🎉 New Best!</div>
 
-  <!-- ═══════════════════ STATS SCREEN ═══════════════════ -->
-  <div id="screen-stats" class="screen hidden">
-    <div class="nav-header">
-      <div class="nav-back" data-back="screen-menu">‹</div>
-      <h2 class="nav-title">Statistics</h2>
+    <div class="go-mini-stats">
+      <div class="go-mini-stat">
+        <div class="gmv" id="go-lines">0</div>
+        <div class="gml">Lines</div>
+      </div>
+      <div class="go-mini-stat">
+        <div class="gmv" id="go-combos">0</div>
+        <div class="gml">Max Combo</div>
+      </div>
+      <div class="go-mini-stat">
+        <div class="gmv" id="go-pieces">0</div>
+        <div class="gml">Pieces</div>
+      </div>
     </div>
-    <div class="scroll-content" id="stats-content"></div>
-  </div>
 
-  <!-- ═══════════════════ ACHIEVEMENTS SCREEN ═══════════════════ -->
-  <div id="screen-achievements" class="screen hidden">
-    <div class="nav-header">
-      <div class="nav-back" data-back="screen-menu">‹</div>
-      <h2 class="nav-title">Achievements</h2>
+    <div class="go-buttons">
+      <button class="btn btn-xl" id="btn-play-again">▶ Play Again</button>
+      <div class="go-btn-row">
+        <button class="btn btn-md" id="btn-share">📤 Share</button>
+        <button class="btn btn-md" id="btn-go-menu">🏠 Menu</button>
+      </div>
     </div>
-    <div class="scroll-content" id="achievements-content"></div>
   </div>
+</div>
+
+<!-- ══════════════════════════════════════════
+     THEMES
+══════════════════════════════════════════ -->
+<div id="screen-themes" class="screen hidden">
+  <div class="nav-bar">
+    <div class="nav-back" data-back="screen-menu">‹</div>
+    <span class="nav-title">Themes</span>
+    <span></span>
+  </div>
+  <div class="scroll-area">
+    <p style="font-size:13px;color:var(--text-2);margin-bottom:12px">Locked themes can be unlocked with coins</p>
+    <div class="themes-grid" id="themes-grid"></div>
+  </div>
+</div>
+
+<!-- ══════════════════════════════════════════
+     SETTINGS
+══════════════════════════════════════════ -->
+<div id="screen-settings" class="screen hidden">
+  <div class="nav-bar">
+    <div class="nav-back" data-back="screen-menu">‹</div>
+    <span class="nav-title">Settings</span>
+    <span></span>
+  </div>
+  <div class="scroll-area">
+
+    <p class="section-label" style="margin-top:8px">Sound</p>
+    <div class="settings-group">
+      <div class="setting-row">
+        <div class="setting-left">
+          <div class="setting-ico">🎵</div>
+          <div class="setting-text">
+            <div class="setting-title">Background Music</div>
+            <div class="setting-sub">Ambient procedural music</div>
+          </div>
+        </div>
+        <label class="toggle">
+          <input type="checkbox" id="toggle-music" checked/>
+          <div class="toggle-track"></div>
+          <div class="toggle-thumb"></div>
+        </label>
+      </div>
+      <div class="setting-row">
+        <div class="setting-left">
+          <div class="setting-ico">🔊</div>
+          <div class="setting-text">
+            <div class="setting-title">Music Volume</div>
+          </div>
+        </div>
+        <input type="range" class="vol-slider" id="slider-music-vol" min="0" max="100" value="70"/>
+      </div>
+      <div class="setting-row">
+        <div class="setting-left">
+          <div class="setting-ico">🎮</div>
+          <div class="setting-text">
+            <div class="setting-title">Sound Effects</div>
+            <div class="setting-sub">Placement, clears, combos</div>
+          </div>
+        </div>
+        <label class="toggle">
+          <input type="checkbox" id="toggle-sfx" checked/>
+          <div class="toggle-track"></div>
+          <div class="toggle-thumb"></div>
+        </label>
+      </div>
+      <div class="setting-row">
+        <div class="setting-left">
+          <div class="setting-ico">📢</div>
+          <div class="setting-text">
+            <div class="setting-title">SFX Volume</div>
+          </div>
+        </div>
+        <input type="range" class="vol-slider" id="slider-sfx-vol" min="0" max="100" value="80"/>
+      </div>
+    </div>
+
+    <p class="section-label">Feedback</p>
+    <div class="settings-group">
+      <div class="setting-row">
+        <div class="setting-left">
+          <div class="setting-ico">📳</div>
+          <div class="setting-text">
+            <div class="setting-title">Haptic Feedback</div>
+            <div class="setting-sub">Vibration on placement & clears</div>
+          </div>
+        </div>
+        <label class="toggle">
+          <input type="checkbox" id="toggle-haptic" checked/>
+          <div class="toggle-track"></div>
+          <div class="toggle-thumb"></div>
+        </label>
+      </div>
+    </div>
+
+    <p class="section-label">Account</p>
+    <div class="settings-group">
+      <div class="setting-row">
+        <div class="setting-left">
+          <div class="setting-ico">👤</div>
+          <div class="setting-text">
+            <div class="setting-title" id="settings-user">—</div>
+            <div class="setting-sub">Telegram account</div>
+          </div>
+        </div>
+      </div>
+      <div class="setting-row">
+        <div class="setting-left">
+          <div class="setting-ico">☁️</div>
+          <div class="setting-text">
+            <div class="setting-title">Cloud Save</div>
+            <div class="setting-sub">Synced to your Telegram account</div>
+          </div>
+        </div>
+        <span style="font-size:12px;font-weight:700;color:var(--green)">Active</span>
+      </div>
+    </div>
+
+    <p class="section-label">Data</p>
+    <div class="settings-group">
+      <div class="setting-row">
+        <div class="setting-left">
+          <div class="setting-ico">🗑</div>
+          <div class="setting-text">
+            <div class="setting-title">Reset Progress</div>
+            <div class="setting-sub">Clears all scores and achievements</div>
+          </div>
+        </div>
+        <button class="btn btn-sm btn-red" onclick="if(confirm('Reset all progress?')){localStorage.clear();location.reload();}">Reset</button>
+      </div>
+    </div>
+
+    <p style="font-size:12px;color:var(--text-3);text-align:center;margin-top:8px;padding-bottom:8px">
+      Block Blast v2.0 · Telegram Mini App
+    </p>
+  </div>
+</div>
+
+<!-- ══════════════════════════════════════════
+     STATS
+══════════════════════════════════════════ -->
+<div id="screen-stats" class="screen hidden">
+  <div class="nav-bar">
+    <div class="nav-back" data-back="screen-menu">‹</div>
+    <span class="nav-title">Statistics</span>
+    <span></span>
+  </div>
+  <div class="scroll-area" id="stats-content"></div>
+</div>
+
+<!-- ══════════════════════════════════════════
+     ACHIEVEMENTS
+══════════════════════════════════════════ -->
+<div id="screen-achievements" class="screen hidden">
+  <div class="nav-bar">
+    <div class="nav-back" data-back="screen-menu">‹</div>
+    <span class="nav-title">Achievements</span>
+    <span></span>
+  </div>
+  <div class="scroll-area" id="ach-content"></div>
+</div>
 
 </div><!-- #app -->
 
-<!-- ═══════════════════ OVERLAYS ═══════════════════ -->
+<!-- ══════════════════════════════════════════
+     OVERLAYS
+══════════════════════════════════════════ -->
 
 <!-- Combo Flash -->
-<div id="combo-display"></div>
+<div id="combo-flash"></div>
 
-<!-- Pause Overlay -->
-<div id="pause-overlay">
-  <div class="pause-title">⏸ Paused</div>
-  <div class="pause-buttons">
-    <button class="btn btn-primary" id="btn-resume">▶ Resume</button>
-    <button class="btn btn-secondary" id="btn-pause-menu" onclick="showScreen('screen-menu');isPaused=false;document.getElementById('pause-overlay').classList.remove('show');">🏠 Menu</button>
+<!-- Pause -->
+<div id="pause-overlay" class="overlay-bg">
+  <div class="overlay-card">
+    <div style="font-size:22px;font-weight:800;letter-spacing:-.5px;margin-bottom:20px">⏸ Paused</div>
+    <div class="pause-btns" style="display:flex;flex-direction:column;gap:10px">
+      <button class="btn btn-xl" id="btn-resume">▶ Resume</button>
+      <button class="btn btn-lg" id="btn-pause-menu">🏠 Main Menu</button>
+    </div>
   </div>
 </div>
 
 <!-- Level Banner -->
 <div id="level-banner">
+  <div id="banner-level"></div>
   <div id="banner-title"></div>
   <div id="banner-story"></div>
   <div id="banner-obj"></div>
@@ -268,41 +478,61 @@
 <div id="level-win">
   <div class="win-card">
     <span class="win-emoji">🎉</span>
-    <div class="win-title">Level Complete</div>
-    <div class="win-level" id="win-title"></div>
-    <div class="win-stars">
-      <span class="star">★</span>
-      <span class="star">★</span>
-      <span class="star">★</span>
+    <div class="win-badge">Level Complete</div>
+    <div class="win-name" id="win-name"></div>
+    <div class="win-stars-row">
+      <span class="win-star">★</span>
+      <span class="win-star">★</span>
+      <span class="win-star">★</span>
     </div>
-    <div class="win-score-row">
+    <div class="win-scores">
       <div class="win-stat">
         <div class="win-stat-val" id="win-score">0</div>
         <div class="win-stat-label">Score</div>
       </div>
+      <div class="win-scores-div"></div>
       <div class="win-stat">
         <div class="win-stat-val" id="win-reward">+0🪙</div>
         <div class="win-stat-label">Reward</div>
       </div>
     </div>
-    <div class="win-buttons">
-      <button class="btn btn-primary" id="btn-next-level">Next Level ›</button>
-      <div style="display:flex;gap:10px">
-        <button class="btn btn-secondary" id="btn-retry-level" style="flex:1">↩ Retry</button>
-        <button class="btn btn-ghost" id="btn-win-menu" style="flex:1">🏠 Menu</button>
+    <div class="win-btns">
+      <button class="btn btn-xl" id="btn-next-level">Next Level ›</button>
+      <div class="win-btn-row">
+        <button class="btn btn-md" id="btn-retry">↩ Retry</button>
+        <button class="btn btn-md" id="btn-win-menu">🏠 Menu</button>
       </div>
     </div>
   </div>
 </div>
 
-<!-- Scripts -->
+<!-- section-label helper -->
+<style>
+  .section-label { font-size:11px; font-weight:700; letter-spacing:.8px; text-transform:uppercase; color:var(--text-3); margin:20px 0 10px; display:block; }
+  .pause-btns { display:flex; flex-direction:column; gap:10px; }
+</style>
+
+<!-- Scripts (order matters) -->
 <script src="js/figures.js"></script>
 <script src="js/levels.js"></script>
 <script src="js/themes.js"></script>
 <script src="js/telegram.js"></script>
 <script src="js/storage.js"></script>
+<script src="js/sounds.js"></script>
 <script src="js/gameEngine.js"></script>
 <script src="js/renderer.js"></script>
 <script src="js/main.js"></script>
+
+<script>
+  // Quick fix: update settings screen username
+  window.addEventListener('DOMContentLoaded', () => {
+    setTimeout(() => {
+      const el = document.getElementById('settings-user');
+      if (el) el.textContent = TG.getUsername() || 'Guest';
+      const g = document.getElementById('menu-games');
+      if (g) g.textContent = Storage.get().gamesPlayed || 0;
+    }, 600);
+  });
+</script>
 </body>
 </html>
